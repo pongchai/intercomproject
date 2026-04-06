@@ -60,11 +60,19 @@ app.get('/stream', async (req, res) => {
     'Connection': 'keep-alive'
   });
 
+  const keepAlive = setInterval(() => {
+    try {
+      res.write(" "); // กัน Railway ตัด connection
+    } catch (e) {}
+  }, 2000);
+
   esp32Clients.push({ deviceId, res });
 
   req.on('close', async () => {
     console.log('[ESP32] Disconnected');
     // ไม่ต้องเปลี่ยนค่า isConnect ให้เก็บ timestamp ล่าสุดไว้
+    clearInterval(keepAlive);
+    
     const index = esp32Clients.findIndex(client => client.res === res);
     if (index !== -1) esp32Clients.splice(index, 1);
   });
