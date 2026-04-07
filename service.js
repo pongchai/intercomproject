@@ -38,8 +38,6 @@ let receiveSelected = [
   //"id"
 ];
 
-
-
 // Route สำหรับ ESP32 เข้ามารับ stream
 app.get('/stream', async (req, res) => {
   console.log('[ESP32] Connected to /stream');
