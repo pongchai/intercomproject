@@ -399,4 +399,11 @@ server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
 
-
+app.get("/test-ytdl", (req, res) => {
+  try {
+    const ytdl = require("ytdl-core");
+    res.send("ytdl-core OK ✅");
+  } catch (e) {
+    res.send("ytdl-core NOT FOUND ❌");
+  }
+});
