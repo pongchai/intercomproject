@@ -418,28 +418,21 @@ app.get("/play-youtube", async (req, res) => {
   }
 
   try {
-    const info = await ytdl.getInfo(url);
+    res.setHeader("Content-Type", "audio/mpeg");
 
-    const format = ytdl.chooseFormat(info.formats, {
+    ytdl(url, {
+      filter: "audioonly",
       quality: "highestaudio",
-      filter: "audioonly"
-    });
-
-    if (!format) {
-      return res.send("หา audio ไม่เจอ");
-    }
-
-    res.setHeader("Content-Type", format.mimeType || "audio/mpeg");
-
-    ytdl(url, { format })
-      .on("error", (err) => {
-        console.error("Stream error:", err);
-        if (!res.headersSent) res.send("stream error");
-      })
-      .pipe(res);
+      highWaterMark: 1 << 25
+    })
+    .on("error", (err) => {
+      console.error("YTDL ERROR:", err);
+      if (!res.headersSent) res.send("stream error");
+    })
+    .pipe(res);
 
   } catch (err) {
-    console.error("YTDL error:", err);
+    console.error("CATCH ERROR:", err);
     res.send("เกิดข้อผิดพลาด");
   }
 });
