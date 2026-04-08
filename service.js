@@ -413,21 +413,33 @@ const ytdl = require("ytdl-core");
 app.get("/play-youtube", async (req, res) => {
   const url = req.query.url;
 
-  if (!url) {
-    return res.send("กรุณาใส่ url");
+  if (!url || !ytdl.validateURL(url)) {
+    return res.status(400).send("URL ไม่ถูกต้อง");
   }
 
   try {
-    const stream = ytdl(url, {
-      filter: "audioonly",
-      quality: "highestaudio"
+    const info = await ytdl.getInfo(url);
+
+    const format = ytdl.chooseFormat(info.formats, {
+      quality: "highestaudio",
+      filter: "audioonly"
     });
 
-    res.setHeader("Content-Type", "audio/mpeg");
-    stream.pipe(res);
+    if (!format) {
+      return res.send("หา audio ไม่เจอ");
+    }
+
+    res.setHeader("Content-Type", format.mimeType || "audio/mpeg");
+
+    ytdl(url, { format })
+      .on("error", (err) => {
+        console.error("Stream error:", err);
+        if (!res.headersSent) res.send("stream error");
+      })
+      .pipe(res);
 
   } catch (err) {
-    console.error(err);
-    res.send("error");
+    console.error("YTDL error:", err);
+    res.send("เกิดข้อผิดพลาด");
   }
 });
