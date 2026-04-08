@@ -407,3 +407,27 @@ app.get("/test-ytdl", (req, res) => {
     res.send("ytdl-core NOT FOUND ❌");
   }
 });
+
+const ytdl = require("ytdl-core");
+
+app.get("/play-youtube", async (req, res) => {
+  const url = req.query.url;
+
+  if (!url) {
+    return res.send("กรุณาใส่ url");
+  }
+
+  try {
+    const stream = ytdl(url, {
+      filter: "audioonly",
+      quality: "highestaudio"
+    });
+
+    res.setHeader("Content-Type", "audio/mpeg");
+    stream.pipe(res);
+
+  } catch (err) {
+    console.error(err);
+    res.send("error");
+  }
+});
