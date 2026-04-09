@@ -37,7 +37,7 @@ app.use(express.json()); // <-- Add this line
 
 const PORT = process.env.PORT || 8097;
 
-const esp32Clients = [];-v
+const esp32Clients = [];
 const audioQueue = [];
 let receiveList = [
   // { id: 'device1', name: 'Device 1', ImageBase64: '', isConnect: 'timestamp' },
