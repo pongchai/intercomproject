@@ -25,10 +25,18 @@ if (!fs.existsSync(pcmFolder)) fs.mkdirSync(pcmFolder);
 
 
 const app = express();
+
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Headers", "*");
+  res.header("Access-Control-Allow-Methods", "*");
+  next();
+});
+
 app.use(cors());
 app.use(express.json()); // <-- Add this line
 
-const PORT = 8097;
+const PORT = process.env.PORT || 8097;
 
 const esp32Clients = [];
 const audioQueue = [];
@@ -433,4 +441,8 @@ app.get('/time', (req, res) => {
     // ส่งกลับเวลา HH:MM:SS ตามที่ต้องการ
     thailand_time 
   });
+});
+
+server.listen(PORT, () => {
+  console.log("Server running on port", PORT);
 });
