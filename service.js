@@ -8,8 +8,7 @@ const cors = require('cors');
 const multer = require('multer');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffmpeg = require('fluent-ffmpeg');
-const ytdl = require("ytdl-core");
-const youtubedl = require('yt-dlp-exec');
+const play = require('play-dl');
 ffmpeg.setFfmpegPath(ffmpegPath);
 // const ffmpeg = require('fluent-ffmpeg');
 
@@ -189,61 +188,28 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
 }
 
 async function streamYoutubeToESP32(url, targetDevices = []) {
+  try {
+    const stream = await play.stream(url);
 
-  const ytdlp = youtubedl.exec(url, {
-    output: '-',
-    format: 'bestaudio',
-  });
+    const pcmStream = ffmpeg(stream.stream)
+      .audioCodec("pcm_s16le")
+      .audioChannels(1)
+      .audioFrequency(16000)
+      .format("s16le")
+      .pipe();
 
-  const pcmStream = ffmpeg(ytdlp.stdout)
-    .audioCodec("pcm_s16le")
-    .audioChannels(1)
-    .audioFrequency(16000)
-    .format("s16le")
-    .pipe();
-
-  pcmStream.on("data", chunk => {
-    esp32Clients.forEach(client => {
-      if (targetDevices.includes(client.deviceId)) {
-        try {
+    pcmStream.on("data", chunk => {
+      esp32Clients.forEach(client => {
+        if (targetDevices.includes(client.deviceId)) {
           client.res.write(chunk);
-        } catch {}
-      }
-    });
-  });
-
-  pcmStream.on("error", err => {
-    console.error("FFmpeg error:", err.message);
-  });
-
-  pcmStream.on("end", () => {
-    console.log("YouTube stream finished");
-  });
-}
-
-  const pcmStream = ffmpeg(ytdlStream)
-    .audioCodec("pcm_s16le")
-    .audioChannels(1)
-    .audioFrequency(16000)
-    .format("s16le")
-    .pipe();
-
-  pcmStream.on("data", chunk => {
-    esp32Clients.forEach(client => {
-      if (targetDevices.includes(client.deviceId)) {
-        try {
-          client.res.write(chunk);
-        } catch (err) {
-          console.error(err.message);
         }
-      }
+      });
     });
-  });
 
-  pcmStream.on("end", () => {
-    console.log("YouTube stream finished");
-  });
-
+  } catch (err) {
+    console.error("Play-dl error:", err.message);
+  }
+}
 
 // POST /schedule
 app.post("/schedule", (req, res) => {
@@ -466,43 +432,4 @@ app.get('/time', (req, res) => {
     // ส่งกลับเวลา HH:MM:SS ตามที่ต้องการ
     thailand_time 
   });
-});
-
-
-server.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
-});
-
-app.get("/test-ytdl", (req, res) => {
-  try {
-    const ytdl = require("ytdl-core");
-    res.send("ytdl-core OK ✅");
-  } catch (e) {
-    res.send("ytdl-core NOT FOUND ❌");
-  }
-});
-
-
-app.get("/play-youtube", async (req, res) => {
-  try {
-    const url = req.query.url;
-
-    res.setHeader("Content-Type", "application/octet-stream");
-
-    const stream = ytdl(url, {
-      filter: "audioonly",
-      quality: "highestaudio"
-    });
-
-    ffmpeg(stream)
-      .audioCodec("pcm_s16le")   // 16-bit PCM
-      .audioChannels(1)          // mono
-      .audioFrequency(16000)     // 16kHz
-      .format("s16le")
-      .pipe(res);
-
-  } catch (err) {
-    console.error(err);
-    res.send("error");
-  }
 });
