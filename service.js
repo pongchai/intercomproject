@@ -455,7 +455,6 @@ app.get("/test-ytdl", (req, res) => {
   }
 });
 
-const ytdl = require("ytdl-core");
 
 app.get("/play-youtube", async (req, res) => {
   try {
