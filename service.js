@@ -20,7 +20,7 @@ const { PassThrough } = require("stream");
 let scheduleList = []; // { id, url, schedAt, mode, job }
 
 let esp32Messages = {}; // เก็บข้อความล่าสุดของแต่ละ device
-const upload = multer({ dest: 'uploads/' });
+// const upload = multer({ dest: 'uploads/' });
 
 const pcmFolder = path.join(__dirname, 'pcm_files');
 if (!fs.existsSync(pcmFolder)) fs.mkdirSync(pcmFolder);
