@@ -9,7 +9,7 @@ const multer = require('multer');
 //const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 //const ffmpeg = require('fluent-ffmpeg');
 //const play = require('play-dl');
-ffmpeg.setFfmpegPath(ffmpegPath);
+//ffmpeg.setFfmpegPath(ffmpegPath);
 // const ffmpeg = require('fluent-ffmpeg');
 
 const schedule = require("node-schedule");
