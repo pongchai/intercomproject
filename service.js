@@ -9,6 +9,7 @@ const multer = require('multer');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffmpeg = require('fluent-ffmpeg');
 const ytdl = require("ytdl-core");
+const youtubedl = require('yt-dlp-exec');
 ffmpeg.setFfmpegPath(ffmpegPath);
 // const ffmpeg = require('fluent-ffmpeg');
 
@@ -189,16 +190,36 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
 
 async function streamYoutubeToESP32(url, targetDevices = []) {
 
-  const ytdlStream = ytdl(url, {
-  filter: "audioonly",
-  quality: "highestaudio",
-  highWaterMark: 1 << 25,
-  requestOptions: {
-    headers: {
-      'User-Agent': 'Mozilla/5.0'
-    }
-  }
-});
+  const ytdlp = youtubedl.exec(url, {
+    output: '-',
+    format: 'bestaudio',
+  });
+
+  const pcmStream = ffmpeg(ytdlp.stdout)
+    .audioCodec("pcm_s16le")
+    .audioChannels(1)
+    .audioFrequency(16000)
+    .format("s16le")
+    .pipe();
+
+  pcmStream.on("data", chunk => {
+    esp32Clients.forEach(client => {
+      if (targetDevices.includes(client.deviceId)) {
+        try {
+          client.res.write(chunk);
+        } catch {}
+      }
+    });
+  });
+
+  pcmStream.on("error", err => {
+    console.error("FFmpeg error:", err.message);
+  });
+
+  pcmStream.on("end", () => {
+    console.log("YouTube stream finished");
+  });
+}
 
   const pcmStream = ffmpeg(ytdlStream)
     .audioCodec("pcm_s16le")
