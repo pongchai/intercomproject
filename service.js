@@ -86,7 +86,13 @@ app.get('/stream', async (req, res) => {
 });
 
 app.get('/receiveList', (req, res) => {
-  res.status(200).json({ receiveList: receiveList});
+  try {
+    console.log("receiveList:", receiveList);
+    res.status(200).json({ receiveList: receiveList});
+  } catch (err) {
+    console.error("ERROR /receiveList:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/updateReceive', (req, res) => {
