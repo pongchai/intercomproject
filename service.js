@@ -243,7 +243,7 @@ async function streamYoutubeToESP32(url, targetDevices = []) {
   pcmStream.on("end", () => {
     console.log("YouTube stream finished");
   });
-}
+
 
 // POST /schedule
 app.post("/schedule", (req, res) => {
