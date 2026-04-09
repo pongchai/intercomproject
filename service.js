@@ -404,20 +404,6 @@ app.post('/sendText', (req, res) => {
   res.json({ success: true, sentTo: deviceIds.length });
 });
 
-app.post("/playYoutubeToDevice", async (req, res) => {
-  const { url, devices } = req.body;
-
-  if (!url) {
-    return res.status(400).json({ error: "No URL" });
-  }
-
-  console.log("Play YouTube:", url);
-
-  streamYoutubeToESP32(url, devices || []);
-
-  res.json({ success: true });
-});
-
 // API เช็คเวลาปัจจุบัน
 app.get('/time', (req, res) => {
   const now = new Date();
