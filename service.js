@@ -190,9 +190,15 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
 async function streamYoutubeToESP32(url, targetDevices = []) {
 
   const ytdlStream = ytdl(url, {
-    filter: "audioonly",
-    quality: "highestaudio"
-  });
+  filter: "audioonly",
+  quality: "highestaudio",
+  highWaterMark: 1 << 25,
+  requestOptions: {
+    headers: {
+      'User-Agent': 'Mozilla/5.0'
+    }
+  }
+});
 
   const pcmStream = ffmpeg(ytdlStream)
     .audioCodec("pcm_s16le")
