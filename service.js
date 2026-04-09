@@ -154,6 +154,7 @@ setInterval(() => {
 // schedule
 
 async function playAudioToESP32(pcmFile, targetDevices = []) {
+  
   const filePath = path.join(pcmFolder, pcmFile);
   if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
 
@@ -183,6 +184,37 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
       await new Promise(r => setTimeout(r, 1));
     }
   })();
+}
+
+async function streamYoutubeToESP32(url, targetDevices = []) {
+
+  const ytdlStream = ytdl(url, {
+    filter: "audioonly",
+    quality: "highestaudio"
+  });
+
+  const pcmStream = ffmpeg(ytdlStream)
+    .audioCodec("pcm_s16le")
+    .audioChannels(1)
+    .audioFrequency(16000)
+    .format("s16le")
+    .pipe();
+
+  pcmStream.on("data", chunk => {
+    esp32Clients.forEach(client => {
+      if (targetDevices.includes(client.deviceId)) {
+        try {
+          client.res.write(chunk);
+        } catch (err) {
+          console.error(err.message);
+        }
+      }
+    });
+  });
+
+  pcmStream.on("end", () => {
+    console.log("YouTube stream finished");
+  });
 }
 
 // POST /schedule
@@ -357,6 +389,20 @@ app.post('/sendText', (req, res) => {
   res.json({ success: true, sentTo: deviceIds.length });
 });
 
+app.post("/playYoutubeToDevice", async (req, res) => {
+  const { url, devices } = req.body;
+
+  if (!url) {
+    return res.status(400).json({ error: "No URL" });
+  }
+
+  console.log("Play YouTube:", url);
+
+  streamYoutubeToESP32(url, devices || []);
+
+  res.json({ success: true });
+});
+
 // API เช็คเวลาปัจจุบัน
 app.get('/time', (req, res) => {
   const now = new Date();
@@ -414,19 +460,22 @@ app.get("/play-youtube", async (req, res) => {
   try {
     const url = req.query.url;
 
-    const info = await ytdl.getInfo(url);
+    res.setHeader("Content-Type", "application/octet-stream");
 
-    const format = ytdl.chooseFormat(info.formats, {
-      quality: "highestaudio",
-      filter: "audioonly"
+    const stream = ytdl(url, {
+      filter: "audioonly",
+      quality: "highestaudio"
     });
 
-    res.setHeader("Content-Type", "audio/mpeg");
-
-    ytdl(url, { format })
+    ffmpeg(stream)
+      .audioCodec("pcm_s16le")   // 16-bit PCM
+      .audioChannels(1)          // mono
+      .audioFrequency(16000)     // 16kHz
+      .format("s16le")
       .pipe(res);
 
   } catch (err) {
+    console.error(err);
     res.send("error");
   }
 });
