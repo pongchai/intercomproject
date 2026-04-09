@@ -37,7 +37,7 @@ app.use(express.json()); // <-- Add this line
 
 const PORT = process.env.PORT || 8097;
 
-const esp32Clients = [];
+const esp32Clients = [];-v
 const audioQueue = [];
 let receiveList = [
   // { id: 'device1', name: 'Device 1', ImageBase64: '', isConnect: 'timestamp' },
@@ -195,29 +195,29 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
   })();
 }
 
-async function streamYoutubeToESP32(url, targetDevices = []) {
-  try {
-    const stream = await play.stream(url);
+// async function streamYoutubeToESP32(url, targetDevices = []) {
+//   try {
+//     const stream = await play.stream(url);
 
-    const pcmStream = ffmpeg(stream.stream)
-      .audioCodec("pcm_s16le")
-      .audioChannels(1)
-      .audioFrequency(16000)
-      .format("s16le")
-      .pipe();
+//     const pcmStream = ffmpeg(stream.stream)
+//       .audioCodec("pcm_s16le")
+//       .audioChannels(1)
+//       .audioFrequency(16000)
+//       .format("s16le")
+//       .pipe();
 
-    pcmStream.on("data", chunk => {
-      esp32Clients.forEach(client => {
-        if (targetDevices.includes(client.deviceId)) {
-          client.res.write(chunk);
-        }
-      });
-    });
+//     pcmStream.on("data", chunk => {
+//       esp32Clients.forEach(client => {
+//         if (targetDevices.includes(client.deviceId)) {
+//           client.res.write(chunk);
+//         }
+//       });
+//     });
 
-  } catch (err) {
-    console.error("Play-dl error:", err.message);
-  }
-}
+//   } catch (err) {
+//     console.error("Play-dl error:", err.message);
+//   }
+// }
 
 // POST /schedule
 app.post("/schedule", (req, res) => {
