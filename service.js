@@ -75,7 +75,7 @@ app.get('/stream', async (req, res) => {
   const keepAlive = setInterval(() => {
     try {
       if (!res.writableEnded) {
-      res.write(" ");
+      res.write(Buffer.from([0]));
       } // กัน Railway ตัด connection
     } catch (e) {}
   }, 15000);
@@ -134,27 +134,34 @@ wss.on('connection', ws => {
   ws.on('message', msg => {
     const buffer = Buffer.from(msg);
     // const cleanedBuffer = removeCRLF(buffer); // ✅ ใช้งานจริง
-    audioQueue.push(buffer);
+      if (audioQueue.length > 500) {
+        audioQueue.length = 0; // เคลียร์ทิ้ง
+      }
+      audioQueue.push(buffer);
   });
   ws.on('close', () => console.log('[Browser] Disconnected'));
 });
 
 // Loop ส่งเสียงไปยัง ESP32 ทุก ๆ 1 ms
 setInterval(() => {
-  if (audioQueue.length > 0 && esp32Clients.length > 0) {
-    const chunk = audioQueue.shift();
-    esp32Clients.forEach(client => {
-      try {
-        if(receiveSelected.includes(client.deviceId)) {
-          if (!client.res.writableEnded) {   // ✅ เพิ่มบรรทัดนี้
-            client.res.write(chunk);
-          }
+  if (audioQueue.length === 0) return;   // ✅ เพิ่มบรรทัดนี้ (สำคัญสุด)
+
+  if (esp32Clients.length === 0) return; // ✅ กันอีกชั้น
+
+  const chunk = audioQueue.shift();
+
+  esp32Clients.forEach(client => {
+    try {
+      if (receiveSelected.includes(client.deviceId)) {
+        if (!client.res.writableEnded) {
+          client.res.write(chunk);
         }
-      } catch (err) {
-        console.error('[ERROR] Write to ESP32 failed:', err.message);
       }
-    });
-  }
+    } catch (err) {
+      console.error('[ERROR] Write to ESP32 failed:', err.message);
+    }
+  });
+
 }, 20);
 
 setInterval(() => {
