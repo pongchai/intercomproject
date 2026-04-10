@@ -134,10 +134,10 @@ wss.on('connection', ws => {
   ws.on('message', msg => {
     const buffer = Buffer.from(msg);
     // const cleanedBuffer = removeCRLF(buffer); // ✅ ใช้งานจริง
-      if (audioQueue.length > 500) {
-        audioQueue.length = 0; // เคลียร์ทิ้ง
-      }
-      audioQueue.push(buffer);
+      // จำกัด queue (สำคัญมาก)
+    if (audioQueue.length < 200) {
+       audioQueue.push(buffer);
+    }
   });
   ws.on('close', () => console.log('[Browser] Disconnected'));
 });
