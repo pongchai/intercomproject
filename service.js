@@ -97,10 +97,10 @@ app.get('/receiveList', (req, res) => {
     console.log("receiveList:", receiveList);
 
     if (!receiveList || !Array.isArray(receiveList)) {
-      return res.json([]); // กันพัง
+      return res.json({ receiveList: [] });
     }
 
-    res.json(receiveList || []);
+    res.json({ receiveList: receiveList });
 
   } catch (err) {
     console.error("ERROR /receiveList:", err);
