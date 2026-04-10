@@ -145,15 +145,17 @@ setInterval(() => {
     const chunk = audioQueue.shift();
     esp32Clients.forEach(client => {
       try {
-      if(receiveSelected.includes(client.deviceId)) {
-        client.res.write(chunk);
-      }
+        if(receiveSelected.includes(client.deviceId)) {
+          if (!client.res.writableEnded) {   // ✅ เพิ่มบรรทัดนี้
+            client.res.write(chunk);
+          }
+        }
       } catch (err) {
         console.error('[ERROR] Write to ESP32 failed:', err.message);
       }
     });
   }
-}, 1);
+}, 20);
 
 setInterval(() => {
   if (esp32Clients.length > 0) {
@@ -200,7 +202,11 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
       const chunk = pcmData.slice(i, i + chunkSize);
       esp32Clients.forEach(client => {
         if (targetDevices.includes(client.deviceId)) {
-          try { client.res.write(chunk); } catch {}
+          try {
+            if (!client.res.writableEnded) {
+              client.res.write(chunk);
+            }   
+          } catch {}
         }
       });
       await new Promise(r => setTimeout(r, 1));
