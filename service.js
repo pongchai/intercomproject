@@ -100,7 +100,7 @@ app.get('/receiveList', (req, res) => {
       return res.json([]); // กันพัง
     }
 
-    res.json(receiveList); // ✅ ส่งตรง ๆ
+    res.json(receiveList || []);
 
   } catch (err) {
     console.error("ERROR /receiveList:", err);
@@ -178,13 +178,12 @@ setInterval(() => {
   if (esp32Clients.length > 0) {
     esp32Clients.forEach(client => {
       try {
-        receiveList.map(device => {
+        receiveList = receiveList.map(device => {
           if (device.id === client.deviceId) {
             device.lastetUpdate = Date.now() + (7 * 60 * 60 * 1000); // อัพเดทเวลาเป็น UTC+7
           }
           return device;
         });
-       
       } catch (err) {
         console.error('err', err.message);
       }
