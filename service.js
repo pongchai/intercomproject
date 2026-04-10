@@ -230,161 +230,161 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
   })();
 }
 
-async function streamYoutubeToESP32(url, targetDevices = []) {
-  try {
-    const stream = await play.stream(url);
+// async function streamYoutubeToESP32(url, targetDevices = []) {
+//   try {
+//     const stream = await play.stream(url);
 
-    const pcmStream = ffmpeg(stream.stream)
-      .audioCodec("pcm_s16le")
-      .audioChannels(1)
-      .audioFrequency(16000)
-      .format("s16le")
-      .pipe();
+//     const pcmStream = ffmpeg(stream.stream)
+//       .audioCodec("pcm_s16le")
+//       .audioChannels(1)
+//       .audioFrequency(16000)
+//       .format("s16le")
+//       .pipe();
 
-    pcmStream.on("data", chunk => {
-      esp32Clients.forEach(client => {
-        if (targetDevices.includes(client.deviceId)) {
-          client.res.write(chunk);
-        }
-      });
-    });
+//     pcmStream.on("data", chunk => {
+//       esp32Clients.forEach(client => {
+//         if (targetDevices.includes(client.deviceId)) {
+//           client.res.write(chunk);
+//         }
+//       });
+//     });
 
-  } catch (err) {
-    console.error("Play-dl error:", err.message);
-  }
-}
+//   } catch (err) {
+//     console.error("Play-dl error:", err.message);
+//   }
+// }
 
-POST /schedule
- app.post("/schedule", (req, res) => {
-  const { fileName, schedAt, mode, devices } = req.body;
-  if (!fileName || !schedAt) return res.status(400).json({ error: "Missing fields" });
+// POST /schedule
+//  app.post("/schedule", (req, res) => {
+//   const { fileName, schedAt, mode, devices } = req.body;
+//   if (!fileName || !schedAt) return res.status(400).json({ error: "Missing fields" });
 
-  const id = Date.now();
-  const schedAtUTC = new Date(schedAt + "+07:00").toISOString();
-  const jobTime = new Date(schedAtUTC)
-  console.log("[Scheduler] Schedule job at:", jobTime.toString());
+//   const id = Date.now();
+//   const schedAtUTC = new Date(schedAt + "+07:00").toISOString();
+//   const jobTime = new Date(schedAtUTC)
+//   console.log("[Scheduler] Schedule job at:", jobTime.toString());
 
-  const job = schedule.scheduleJob(jobTime, async () => {
-  console.log("[Scheduler] Job triggered at:", new Date().toISOString());
-    if (!esp32Clients.length) {
-      console.log("[Scheduler] No ESP32 clients connected");
-      return;
-    }
-    await  playAudioToESP32(fileName, devices || [] );
+//   const job = schedule.scheduleJob(jobTime, async () => {
+//   console.log("[Scheduler] Job triggered at:", new Date().toISOString());
+//     if (!esp32Clients.length) {
+//       console.log("[Scheduler] No ESP32 clients connected");
+//       return;
+//     }
+//     await  playAudioToESP32(fileName, devices || [] );
 
-    if (mode === "ครั้งเดียว") {
-      scheduleList = scheduleList.filter(i => i.id !== id);
-    } else if (mode === "ทุกวัน") {
-      const next = new Date(jobTime.getTime() + 24*60*60*1000);
-      scheduleList = scheduleList.map(i => i.id === id ? { ...i, schedAt: next.toISOString() } : i);
-      schedule.scheduleJob(next, async () => await playAudioToESP32(fileName, devices || [] ));
-    }
-  });
+//     if (mode === "ครั้งเดียว") {
+//       scheduleList = scheduleList.filter(i => i.id !== id);
+//     } else if (mode === "ทุกวัน") {
+//       const next = new Date(jobTime.getTime() + 24*60*60*1000);
+//       scheduleList = scheduleList.map(i => i.id === id ? { ...i, schedAt: next.toISOString() } : i);
+//       schedule.scheduleJob(next, async () => await playAudioToESP32(fileName, devices || [] ));
+//     }
+//   });
 
-  scheduleList.push({ id, fileName, schedAt, mode, job });
-  const sendList = scheduleList.map(({ job, ...rest }) => rest);
-  res.json({ scheduleList: sendList, timeNow: new Date().toISOString() });
-});
+//   scheduleList.push({ id, fileName, schedAt, mode, job });
+//   const sendList = scheduleList.map(({ job, ...rest }) => rest);
+//   res.json({ scheduleList: sendList, timeNow: new Date().toISOString() });
+// });
 
-app.put("/schedule/:id", (req, res) => {
-  const id = parseInt(req.params.id);
-  const { fileName, schedAt, mode } = req.body;
-  let item = scheduleList.find(i => i.id === id);
-  if (!item) {
-    return res.status(404).json({ error: "Schedule not found" });
-  }
-  // Cancel old job if exists
-  if (item.job) item.job.cancel();
+// app.put("/schedule/:id", (req, res) => {
+//   const id = parseInt(req.params.id);
+//   const { fileName, schedAt, mode } = req.body;
+//   let item = scheduleList.find(i => i.id === id);
+//   if (!item) {
+//     return res.status(404).json({ error: "Schedule not found" });
+//   }
+//   // Cancel old job if exists
+//   if (item.job) item.job.cancel();
 
-  // Update fields
-  item.fileName = fileName;
-  item.schedAt = schedAt;
-  item.mode = mode;
+//   // Update fields
+//   item.fileName = fileName;
+//   item.schedAt = schedAt;
+//   item.mode = mode;
 
-  // Reschedule job
-  const schedAtUTC = new Date(schedAt + "+07:00").toISOString();
-  const jobTime = new Date(schedAtUTC);
-  item.job = schedule.scheduleJob(jobTime, async () => {
-    await playAudioToESP32(fileName);
-    if (mode === "ครั้งเดียว") {
-      scheduleList = scheduleList.filter(i => i.id !== id);
-    } else if (mode === "ทุกวัน") {
-      const next = new Date(jobTime.getTime() + 24*60*60*1000);
-      item.schedAt = next.toISOString();
-      item.job = schedule.scheduleJob(next, async () => await playAudioToESP32(fileName));
-    }
-  });
+//   // Reschedule job
+//   const schedAtUTC = new Date(schedAt + "+07:00").toISOString();
+//   const jobTime = new Date(schedAtUTC);
+//   item.job = schedule.scheduleJob(jobTime, async () => {
+//     await playAudioToESP32(fileName);
+//     if (mode === "ครั้งเดียว") {
+//       scheduleList = scheduleList.filter(i => i.id !== id);
+//     } else if (mode === "ทุกวัน") {
+//       const next = new Date(jobTime.getTime() + 24*60*60*1000);
+//       item.schedAt = next.toISOString();
+//       item.job = schedule.scheduleJob(next, async () => await playAudioToESP32(fileName));
+//     }
+//   });
 
-  const sendList = scheduleList.map(({ job, ...rest }) => rest);
-  res.json({ scheduleList: sendList });
-});
+//   const sendList = scheduleList.map(({ job, ...rest }) => rest);
+//   res.json({ scheduleList: sendList });
+// });
 
-GET /schedule
-app.get("/schedule", (req, res) => {
-  const sendList = scheduleList.map(({ job, ...rest }) => rest);
-  res.json({ scheduleList: sendList });
-});
+// GET /schedule
+// app.get("/schedule", (req, res) => {
+//   const sendList = scheduleList.map(({ job, ...rest }) => rest);
+//   res.json({ scheduleList: sendList });
+// });
 
-app.get("/schedule/:id", (req, res) => {
-  const id = parseInt(req.params.id);
-  const item = scheduleList.find(i => i.id === id);
-  if (!item) {
-    return res.status(404).json({ error: "Schedule not found" });
-  }
-  // Remove job property before sending
-  const { job, ...rest } = item;
-  res.json(rest);
-});
+// app.get("/schedule/:id", (req, res) => {
+//   const id = parseInt(req.params.id);
+//   const item = scheduleList.find(i => i.id === id);
+//   if (!item) {
+//     return res.status(404).json({ error: "Schedule not found" });
+//   }
+//   // Remove job property before sending
+//   const { job, ...rest } = item;
+//   res.json(rest);
+// });
 
-DELETE /schedule/:id
-app.delete("/schedule/:id", (req, res) => {
-  const id = parseInt(req.params.id);
-  const item = scheduleList.find(i => i.id === id);
-  if (item && item.job) item.job.cancel();
-  scheduleList = scheduleList.filter(i => i.id !== id);
+// DELETE /schedule/:id
+// app.delete("/schedule/:id", (req, res) => {
+//   const id = parseInt(req.params.id);
+//   const item = scheduleList.find(i => i.id === id);
+//   if (item && item.job) item.job.cancel();
+//   scheduleList = scheduleList.filter(i => i.id !== id);
 
-  const sendList = scheduleList.map(({ job, ...rest }) => rest);
-  res.json({ scheduleList: sendList });
-});
+//   const sendList = scheduleList.map(({ job, ...rest }) => rest);
+//   res.json({ scheduleList: sendList });
+// });
 
-app.post('/uploadAudio', upload.single('file'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+// app.post('/uploadAudio', upload.single('file'), async (req, res) => {
+//   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
-  const inputPath = req.file.path;
-  console.log(req.file);
+//   const inputPath = req.file.path;
+//   console.log(req.file);
   
-  const originalName = req.file.originalname.replace(/\.[^/.]+$/, "");
-  const outputName = originalName + '.pcm';
-  const outputPath = path.join(pcmFolder, outputName);
+//   const originalName = req.file.originalname.replace(/\.[^/.]+$/, "");
+//   const outputName = originalName + '.pcm';
+//   const outputPath = path.join(pcmFolder, outputName);
 
-  try {
-    ffmpeg(inputPath)
-      .outputOptions([
-        '-f s16le',      // PCM 16-bit little endian
-        '-acodec pcm_s16le',
-        '-ac 1',         // mono channel
-        '-ar 16000'      // 16 kHz sample rate
-      ])
-      .save(outputPath)
-      .on('end', () => {
-        // ลบไฟล์ต้นฉบับหลังแปลงเสร็จ
-        fs.unlink(inputPath, err => {
-          if (err) console.error('Failed to delete temp file:', err);
-        });
+//   try {
+//     ffmpeg(inputPath)
+//       .outputOptions([
+//         '-f s16le',      // PCM 16-bit little endian
+//         '-acodec pcm_s16le',
+//         '-ac 1',         // mono channel
+//         '-ar 16000'      // 16 kHz sample rate
+//       ])
+//       .save(outputPath)
+//       .on('end', () => {
+//         // ลบไฟล์ต้นฉบับหลังแปลงเสร็จ
+//         fs.unlink(inputPath, err => {
+//           if (err) console.error('Failed to delete temp file:', err);
+//         });
 
-        res.json({ success: true, pcmFile: outputName });
-        console.log('[Upload] PCM created:', outputName);
-      })
-      .on('error', (err) => {
-        console.error('[Upload] FFmpeg error:', err);
-        res.status(500).json({ error: err.message });
-      });
+//         res.json({ success: true, pcmFile: outputName });
+//         console.log('[Upload] PCM created:', outputName);
+//       })
+//       .on('error', (err) => {
+//         console.error('[Upload] FFmpeg error:', err);
+//         res.status(500).json({ error: err.message });
+//       });
 
-  } catch (err) {
-    console.error('[Upload] Unexpected error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
+//   } catch (err) {
+//     console.error('[Upload] Unexpected error:', err);
+//     res.status(500).json({ error: err.message });
+//   }
+// });
 
 app.get('/audioList', (req, res) => {
   const PCM_FOLDER = pcmFolder
