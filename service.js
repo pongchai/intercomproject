@@ -95,7 +95,13 @@ app.get('/stream', async (req, res) => {
 app.get('/receiveList', (req, res) => {
   try {
     console.log("receiveList:", receiveList);
-    res.status(200).json({ receiveList: receiveList});
+
+    if (!receiveList || !Array.isArray(receiveList)) {
+      return res.json([]); // กันพัง
+    }
+
+    res.json(receiveList); // ✅ ส่งตรง ๆ
+
   } catch (err) {
     console.error("ERROR /receiveList:", err);
     res.status(500).json({ error: err.message });
@@ -107,11 +113,15 @@ app.post('/updateReceive', (req, res) => {
   console.log('[UPDATE] Received payload:', payload);
   if(payload.id) {
     receiveList = receiveList.map(device => {
-      if(device.id === payload.id) {
-        return { ...device, name: payload.name, ImageBase64: payload.ImageBase64 || '' };
+    if (device.id === payload.id) {
+        return {
+          ...device,
+          name: payload.name,
+          imageBase64: payload.imageBase64 || ''
+        };
       }
-      return device;
-    })
+      return device; // ✅ ห้ามลืม
+    });
   }
   res.status(200).json({ receiveList: receiveList});
 });
