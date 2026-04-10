@@ -65,16 +65,16 @@ app.get('/stream', async (req, res) => {
   }
   console.log('Device ID:', deviceId);
 
-  res.writeHead(200, {
-    'Content-Type': 'application/octet-stream',
-    'Connection': 'keep-alive'
-  });
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('Transfer-Encoding', 'chunked');
 
   const keepAlive = setInterval(() => {
     try {
-      res.write(" "); // กัน Railway ตัด connection
+      if (!res.writableEnded) {
+      res.write(" ");
+      } // กัน Railway ตัด connection
     } catch (e) {}
-  }, 2000);
+  }, 15000);
 
   esp32Clients.push({ deviceId, res });
 
