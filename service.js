@@ -1,9 +1,9 @@
 process.on('uncaughtException', (err) => {
-  console.error(' UNCAUGHT EXCEPTION:', err);
+  console.error('CRASH:', err);
 });
 
 process.on('unhandledRejection', (err) => {
-  console.error(' UNHANDLED REJECTION:', err);
+  console.error('REJECTION:', err);
 });
 const express = require('express');
 const http = require('http');
@@ -209,7 +209,7 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
           } catch {}
         }
       });
-      await new Promise(r => setTimeout(r, 1));
+      await new Promise(r => setTimeout(r, 20));
     }
   })();
 }
