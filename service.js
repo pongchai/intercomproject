@@ -1,26 +1,24 @@
-process.on('uncaughtException', (err) => {
-  console.error('CRASH:', err);
-});
-
-process.on('unhandledRejection', (err) => {
-  console.error('REJECTION:', err);
-});
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
-// const { google } = require('googleapis');
+const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
-// const multer = require('multer');
+const multer = require('multer');
+//const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+//const ffmpeg = require('fluent-ffmpeg');
+//const play = require('play-dl');
+//ffmpeg.setFfmpegPath(ffmpegPath);
+// const ffmpeg = require('fluent-ffmpeg');
 
-// const schedule = require("node-schedule");
+const schedule = require("node-schedule");
 
 const { PassThrough } = require("stream");
 let scheduleList = []; // { id, url, schedAt, mode, job }
 
 let esp32Messages = {}; // เก็บข้อความล่าสุดของแต่ละ device
-// const upload = multer({ dest: 'uploads/' });
+const upload = multer({ dest: 'uploads/' });
 
 const pcmFolder = path.join(__dirname, 'pcm_files');
 if (!fs.existsSync(pcmFolder)) fs.mkdirSync(pcmFolder);
@@ -35,11 +33,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  allowedHeaders: ["Content-Type"]
-}));
+app.use(cors());
 app.use(express.json()); // <-- Add this line
 
 const PORT = process.env.PORT || 8097;
@@ -69,16 +63,16 @@ app.get('/stream', async (req, res) => {
   }
   console.log('Device ID:', deviceId);
 
-  res.setHeader('Content-Type', 'application/octet-stream');
-  res.setHeader('Transfer-Encoding', 'chunked');
+  res.writeHead(200, {
+    'Content-Type': 'application/octet-stream',
+    'Connection': 'keep-alive'
+  });
 
   const keepAlive = setInterval(() => {
     try {
-      if (!res.writableEnded) {
-      res.write(Buffer.from([0]));
-      } // กัน Railway ตัด connection
+      res.write(" "); // กัน Railway ตัด connection
     } catch (e) {}
-  }, 15000);
+  }, 2000);
 
   esp32Clients.push({ deviceId, res });
 
@@ -93,19 +87,7 @@ app.get('/stream', async (req, res) => {
 });
 
 app.get('/receiveList', (req, res) => {
-  try {
-    console.log("receiveList:", receiveList);
-
-    if (!receiveList || !Array.isArray(receiveList)) {
-      return res.json({ receiveList: [] });
-    }
-
-    res.json({ receiveList: receiveList });
-
-  } catch (err) {
-    console.error("ERROR /receiveList:", err);
-    res.status(500).json({ error: err.message });
-  }
+  res.status(200).json({ receiveList: receiveList});
 });
 
 app.post('/updateReceive', (req, res) => {
@@ -113,15 +95,11 @@ app.post('/updateReceive', (req, res) => {
   console.log('[UPDATE] Received payload:', payload);
   if(payload.id) {
     receiveList = receiveList.map(device => {
-    if (device.id === payload.id) {
-        return {
-          ...device,
-          name: payload.name,
-          imageBase64: payload.imageBase64 || ''
-        };
+      if(device.id === payload.id) {
+        return { ...device, name: payload.name, ImageBase64: payload.ImageBase64 || '' };
       }
-      return device; // ✅ ห้ามลืม
-    });
+      return device;
+    })
   }
   res.status(200).json({ receiveList: receiveList});
 });
@@ -144,46 +122,38 @@ wss.on('connection', ws => {
   ws.on('message', msg => {
     const buffer = Buffer.from(msg);
     // const cleanedBuffer = removeCRLF(buffer); // ✅ ใช้งานจริง
-      // จำกัด queue (สำคัญมาก)
-    if (audioQueue.length < 200) {
-       audioQueue.push(buffer);
-    }
+    audioQueue.push(buffer);
   });
   ws.on('close', () => console.log('[Browser] Disconnected'));
 });
 
 // Loop ส่งเสียงไปยัง ESP32 ทุก ๆ 1 ms
 setInterval(() => {
-  if (audioQueue.length === 0) return;   // ✅ เพิ่มบรรทัดนี้ (สำคัญสุด)
-
-  if (esp32Clients.length === 0) return; // ✅ กันอีกชั้น
-
-  const chunk = audioQueue.shift();
-
-  esp32Clients.forEach(client => {
-    try {
-      if (receiveSelected.includes(client.deviceId)) {
-        if (!client.res.writableEnded) {
-          client.res.write(chunk);
-        }
+  if (audioQueue.length > 0 && esp32Clients.length > 0) {
+    const chunk = audioQueue.shift();
+    esp32Clients.forEach(client => {
+      try {
+      if(receiveSelected.includes(client.deviceId)) {
+        client.res.write(chunk);
       }
-    } catch (err) {
-      console.error('[ERROR] Write to ESP32 failed:', err.message);
-    }
-  });
-
-}, 20);
+      } catch (err) {
+        console.error('[ERROR] Write to ESP32 failed:', err.message);
+      }
+    });
+  }
+}, 1);
 
 setInterval(() => {
   if (esp32Clients.length > 0) {
     esp32Clients.forEach(client => {
       try {
-        receiveList = receiveList.map(device => {
+        receiveList.map(device => {
           if (device.id === client.deviceId) {
             device.lastetUpdate = Date.now() + (7 * 60 * 60 * 1000); // อัพเดทเวลาเป็น UTC+7
           }
           return device;
         });
+       
       } catch (err) {
         console.error('err', err.message);
       }
@@ -218,173 +188,169 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
       const chunk = pcmData.slice(i, i + chunkSize);
       esp32Clients.forEach(client => {
         if (targetDevices.includes(client.deviceId)) {
-          try {
-            if (!client.res.writableEnded) {
-              client.res.write(chunk);
-            }   
-          } catch {}
+          try { client.res.write(chunk); } catch {}
         }
       });
-      await new Promise(r => setTimeout(r, 20));
+      await new Promise(r => setTimeout(r, 1));
     }
   })();
 }
 
-// async function streamYoutubeToESP32(url, targetDevices = []) {
-//   try {
-//     const stream = await play.stream(url);
+async function streamYoutubeToESP32(url, targetDevices = []) {
+  try {
+    const stream = await play.stream(url);
 
-//     const pcmStream = ffmpeg(stream.stream)
-//       .audioCodec("pcm_s16le")
-//       .audioChannels(1)
-//       .audioFrequency(16000)
-//       .format("s16le")
-//       .pipe();
+    const pcmStream = ffmpeg(stream.stream)
+      .audioCodec("pcm_s16le")
+      .audioChannels(1)
+      .audioFrequency(16000)
+      .format("s16le")
+      .pipe();
 
-//     pcmStream.on("data", chunk => {
-//       esp32Clients.forEach(client => {
-//         if (targetDevices.includes(client.deviceId)) {
-//           client.res.write(chunk);
-//         }
-//       });
-//     });
+    pcmStream.on("data", chunk => {
+      esp32Clients.forEach(client => {
+        if (targetDevices.includes(client.deviceId)) {
+          client.res.write(chunk);
+        }
+      });
+    });
 
-//   } catch (err) {
-//     console.error("Play-dl error:", err.message);
-//   }
-// }
+  } catch (err) {
+    console.error("Play-dl error:", err.message);
+  }
+}
 
 // POST /schedule
-//  app.post("/schedule", (req, res) => {
-//   const { fileName, schedAt, mode, devices } = req.body;
-//   if (!fileName || !schedAt) return res.status(400).json({ error: "Missing fields" });
+app.post("/schedule", (req, res) => {
+  const { fileName, schedAt, mode, devices } = req.body;
+  if (!fileName || !schedAt) return res.status(400).json({ error: "Missing fields" });
 
-//   const id = Date.now();
-//   const schedAtUTC = new Date(schedAt + "+07:00").toISOString();
-//   const jobTime = new Date(schedAtUTC)
-//   console.log("[Scheduler] Schedule job at:", jobTime.toString());
+  const id = Date.now();
+  const schedAtUTC = new Date(schedAt + "+07:00").toISOString();
+  const jobTime = new Date(schedAtUTC)
+  console.log("[Scheduler] Schedule job at:", jobTime.toString());
 
-//   const job = schedule.scheduleJob(jobTime, async () => {
-//   console.log("[Scheduler] Job triggered at:", new Date().toISOString());
-//     if (!esp32Clients.length) {
-//       console.log("[Scheduler] No ESP32 clients connected");
-//       return;
-//     }
-//     await  playAudioToESP32(fileName, devices || [] );
+  const job = schedule.scheduleJob(jobTime, async () => {
+  console.log("[Scheduler] Job triggered at:", new Date().toISOString());
+    if (!esp32Clients.length) {
+      console.log("[Scheduler] No ESP32 clients connected");
+      return;
+    }
+    await  playAudioToESP32(fileName, devices || [] );
 
-//     if (mode === "ครั้งเดียว") {
-//       scheduleList = scheduleList.filter(i => i.id !== id);
-//     } else if (mode === "ทุกวัน") {
-//       const next = new Date(jobTime.getTime() + 24*60*60*1000);
-//       scheduleList = scheduleList.map(i => i.id === id ? { ...i, schedAt: next.toISOString() } : i);
-//       schedule.scheduleJob(next, async () => await playAudioToESP32(fileName, devices || [] ));
-//     }
-//   });
+    if (mode === "ครั้งเดียว") {
+      scheduleList = scheduleList.filter(i => i.id !== id);
+    } else if (mode === "ทุกวัน") {
+      const next = new Date(jobTime.getTime() + 24*60*60*1000);
+      scheduleList = scheduleList.map(i => i.id === id ? { ...i, schedAt: next.toISOString() } : i);
+      schedule.scheduleJob(next, async () => await playAudioToESP32(fileName, devices || [] ));
+    }
+  });
 
-//   scheduleList.push({ id, fileName, schedAt, mode, job });
-//   const sendList = scheduleList.map(({ job, ...rest }) => rest);
-//   res.json({ scheduleList: sendList, timeNow: new Date().toISOString() });
-// });
+  scheduleList.push({ id, fileName, schedAt, mode, job });
+  const sendList = scheduleList.map(({ job, ...rest }) => rest);
+  res.json({ scheduleList: sendList, timeNow: new Date().toISOString() });
+});
 
-// app.put("/schedule/:id", (req, res) => {
-//   const id = parseInt(req.params.id);
-//   const { fileName, schedAt, mode } = req.body;
-//   let item = scheduleList.find(i => i.id === id);
-//   if (!item) {
-//     return res.status(404).json({ error: "Schedule not found" });
-//   }
-//   // Cancel old job if exists
-//   if (item.job) item.job.cancel();
+app.put("/schedule/:id", (req, res) => {
+  const id = parseInt(req.params.id);
+  const { fileName, schedAt, mode } = req.body;
+  let item = scheduleList.find(i => i.id === id);
+  if (!item) {
+    return res.status(404).json({ error: "Schedule not found" });
+  }
+  // Cancel old job if exists
+  if (item.job) item.job.cancel();
 
-//   // Update fields
-//   item.fileName = fileName;
-//   item.schedAt = schedAt;
-//   item.mode = mode;
+  // Update fields
+  item.fileName = fileName;
+  item.schedAt = schedAt;
+  item.mode = mode;
 
-//   // Reschedule job
-//   const schedAtUTC = new Date(schedAt + "+07:00").toISOString();
-//   const jobTime = new Date(schedAtUTC);
-//   item.job = schedule.scheduleJob(jobTime, async () => {
-//     await playAudioToESP32(fileName);
-//     if (mode === "ครั้งเดียว") {
-//       scheduleList = scheduleList.filter(i => i.id !== id);
-//     } else if (mode === "ทุกวัน") {
-//       const next = new Date(jobTime.getTime() + 24*60*60*1000);
-//       item.schedAt = next.toISOString();
-//       item.job = schedule.scheduleJob(next, async () => await playAudioToESP32(fileName));
-//     }
-//   });
+  // Reschedule job
+  const schedAtUTC = new Date(schedAt + "+07:00").toISOString();
+  const jobTime = new Date(schedAtUTC);
+  item.job = schedule.scheduleJob(jobTime, async () => {
+    await playAudioToESP32(fileName);
+    if (mode === "ครั้งเดียว") {
+      scheduleList = scheduleList.filter(i => i.id !== id);
+    } else if (mode === "ทุกวัน") {
+      const next = new Date(jobTime.getTime() + 24*60*60*1000);
+      item.schedAt = next.toISOString();
+      item.job = schedule.scheduleJob(next, async () => await playAudioToESP32(fileName));
+    }
+  });
 
-//   const sendList = scheduleList.map(({ job, ...rest }) => rest);
-//   res.json({ scheduleList: sendList });
-// });
+  const sendList = scheduleList.map(({ job, ...rest }) => rest);
+  res.json({ scheduleList: sendList });
+});
 
 // GET /schedule
-// app.get("/schedule", (req, res) => {
-//   const sendList = scheduleList.map(({ job, ...rest }) => rest);
-//   res.json({ scheduleList: sendList });
-// });
+app.get("/schedule", (req, res) => {
+  const sendList = scheduleList.map(({ job, ...rest }) => rest);
+  res.json({ scheduleList: sendList });
+});
 
-// app.get("/schedule/:id", (req, res) => {
-//   const id = parseInt(req.params.id);
-//   const item = scheduleList.find(i => i.id === id);
-//   if (!item) {
-//     return res.status(404).json({ error: "Schedule not found" });
-//   }
-//   // Remove job property before sending
-//   const { job, ...rest } = item;
-//   res.json(rest);
-// });
+app.get("/schedule/:id", (req, res) => {
+  const id = parseInt(req.params.id);
+  const item = scheduleList.find(i => i.id === id);
+  if (!item) {
+    return res.status(404).json({ error: "Schedule not found" });
+  }
+  // Remove job property before sending
+  const { job, ...rest } = item;
+  res.json(rest);
+});
 
 // DELETE /schedule/:id
-// app.delete("/schedule/:id", (req, res) => {
-//   const id = parseInt(req.params.id);
-//   const item = scheduleList.find(i => i.id === id);
-//   if (item && item.job) item.job.cancel();
-//   scheduleList = scheduleList.filter(i => i.id !== id);
+app.delete("/schedule/:id", (req, res) => {
+  const id = parseInt(req.params.id);
+  const item = scheduleList.find(i => i.id === id);
+  if (item && item.job) item.job.cancel();
+  scheduleList = scheduleList.filter(i => i.id !== id);
 
-//   const sendList = scheduleList.map(({ job, ...rest }) => rest);
-//   res.json({ scheduleList: sendList });
-// });
+  const sendList = scheduleList.map(({ job, ...rest }) => rest);
+  res.json({ scheduleList: sendList });
+});
 
-// app.post('/uploadAudio', upload.single('file'), async (req, res) => {
-//   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+app.post('/uploadAudio', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
-//   const inputPath = req.file.path;
-//   console.log(req.file);
+  const inputPath = req.file.path;
+  console.log(req.file);
   
-//   const originalName = req.file.originalname.replace(/\.[^/.]+$/, "");
-//   const outputName = originalName + '.pcm';
-//   const outputPath = path.join(pcmFolder, outputName);
+  const originalName = req.file.originalname.replace(/\.[^/.]+$/, "");
+  const outputName = originalName + '.pcm';
+  const outputPath = path.join(pcmFolder, outputName);
 
-//   try {
-//     ffmpeg(inputPath)
-//       .outputOptions([
-//         '-f s16le',      // PCM 16-bit little endian
-//         '-acodec pcm_s16le',
-//         '-ac 1',         // mono channel
-//         '-ar 16000'      // 16 kHz sample rate
-//       ])
-//       .save(outputPath)
-//       .on('end', () => {
-//         // ลบไฟล์ต้นฉบับหลังแปลงเสร็จ
-//         fs.unlink(inputPath, err => {
-//           if (err) console.error('Failed to delete temp file:', err);
-//         });
+  try {
+    ffmpeg(inputPath)
+      .outputOptions([
+        '-f s16le',      // PCM 16-bit little endian
+        '-acodec pcm_s16le',
+        '-ac 1',         // mono channel
+        '-ar 16000'      // 16 kHz sample rate
+      ])
+      .save(outputPath)
+      .on('end', () => {
+        // ลบไฟล์ต้นฉบับหลังแปลงเสร็จ
+        fs.unlink(inputPath, err => {
+          if (err) console.error('Failed to delete temp file:', err);
+        });
 
-//         res.json({ success: true, pcmFile: outputName });
-//         console.log('[Upload] PCM created:', outputName);
-//       })
-//       .on('error', (err) => {
-//         console.error('[Upload] FFmpeg error:', err);
-//         res.status(500).json({ error: err.message });
-//       });
+        res.json({ success: true, pcmFile: outputName });
+        console.log('[Upload] PCM created:', outputName);
+      })
+      .on('error', (err) => {
+        console.error('[Upload] FFmpeg error:', err);
+        res.status(500).json({ error: err.message });
+      });
 
-//   } catch (err) {
-//     console.error('[Upload] Unexpected error:', err);
-//     res.status(500).json({ error: err.message });
-//   }
-// });
+  } catch (err) {
+    console.error('[Upload] Unexpected error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get('/audioList', (req, res) => {
   const PCM_FOLDER = pcmFolder
@@ -424,6 +390,20 @@ app.post('/sendText', (req, res) => {
   });
 
   res.json({ success: true, sentTo: deviceIds.length });
+});
+
+app.post("/playYoutubeToDevice", async (req, res) => {
+  const { url, devices } = req.body;
+
+  if (!url) {
+    return res.status(400).json({ error: "No URL" });
+  }
+
+  console.log("Play YouTube:", url);
+
+  streamYoutubeToESP32(url, devices || []);
+
+  res.json({ success: true });
 });
 
 // API เช็คเวลาปัจจุบัน
