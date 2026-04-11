@@ -6,11 +6,6 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
-//const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
-//const ffmpeg = require('fluent-ffmpeg');
-//const play = require('play-dl');
-//ffmpeg.setFfmpegPath(ffmpegPath);
-// const ffmpeg = require('fluent-ffmpeg');
 
 const schedule = require("node-schedule");
 
@@ -196,30 +191,6 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
   })();
 }
 
-async function streamYoutubeToESP32(url, targetDevices = []) {
-  try {
-    const stream = await play.stream(url);
-
-    const pcmStream = ffmpeg(stream.stream)
-      .audioCodec("pcm_s16le")
-      .audioChannels(1)
-      .audioFrequency(16000)
-      .format("s16le")
-      .pipe();
-
-    pcmStream.on("data", chunk => {
-      esp32Clients.forEach(client => {
-        if (targetDevices.includes(client.deviceId)) {
-          client.res.write(chunk);
-        }
-      });
-    });
-
-  } catch (err) {
-    console.error("Play-dl error:", err.message);
-  }
-}
-
 // POST /schedule
 app.post("/schedule", (req, res) => {
   const { fileName, schedAt, mode, devices } = req.body;
@@ -392,19 +363,6 @@ app.post('/sendText', (req, res) => {
   res.json({ success: true, sentTo: deviceIds.length });
 });
 
-app.post("/playYoutubeToDevice", async (req, res) => {
-  const { url, devices } = req.body;
-
-  if (!url) {
-    return res.status(400).json({ error: "No URL" });
-  }
-
-  console.log("Play YouTube:", url);
-
-  streamYoutubeToESP32(url, devices || []);
-
-  res.json({ success: true });
-});
 
 // API เช็คเวลาปัจจุบัน
 app.get('/time', (req, res) => {
