@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
+const ffmpeg = require('fluent-ffmpeg');
 
 const schedule = require("node-schedule");
 
@@ -284,44 +285,44 @@ app.delete("/schedule/:id", (req, res) => {
   res.json({ scheduleList: sendList });
 });
 
-app.post('/uploadAudio', upload.single('file'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+// app.post('/uploadAudio', upload.single('file'), async (req, res) => {
+//   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
-  const inputPath = req.file.path;
-  console.log(req.file);
+//   const inputPath = req.file.path;
+//   console.log(req.file);
   
-  const originalName = req.file.originalname.replace(/\.[^/.]+$/, "");
-  const outputName = originalName + '.pcm';
-  const outputPath = path.join(pcmFolder, outputName);
+//   const originalName = req.file.originalname.replace(/\.[^/.]+$/, "");
+//   const outputName = originalName + '.pcm';
+//   const outputPath = path.join(pcmFolder, outputName);
 
-  try {
-    ffmpeg(inputPath)
-      .outputOptions([
-        '-f s16le',      // PCM 16-bit little endian
-        '-acodec pcm_s16le',
-        '-ac 1',         // mono channel
-        '-ar 16000'      // 16 kHz sample rate
-      ])
-      .save(outputPath)
-      .on('end', () => {
-        // ลบไฟล์ต้นฉบับหลังแปลงเสร็จ
-        fs.unlink(inputPath, err => {
-          if (err) console.error('Failed to delete temp file:', err);
-        });
+//   try {
+//     ffmpeg(inputPath)
+//       .outputOptions([
+//         '-f s16le',      // PCM 16-bit little endian
+//         '-acodec pcm_s16le',
+//         '-ac 1',         // mono channel
+//         '-ar 16000'      // 16 kHz sample rate
+//       ])
+//       .save(outputPath)
+//       .on('end', () => {
+//         // ลบไฟล์ต้นฉบับหลังแปลงเสร็จ
+//         fs.unlink(inputPath, err => {
+//           if (err) console.error('Failed to delete temp file:', err);
+//         });
 
-        res.json({ success: true, pcmFile: outputName });
-        console.log('[Upload] PCM created:', outputName);
-      })
-      .on('error', (err) => {
-        console.error('[Upload] FFmpeg error:', err);
-        res.status(500).json({ error: err.message });
-      });
+//         res.json({ success: true, pcmFile: outputName });
+//         console.log('[Upload] PCM created:', outputName);
+//       })
+//       .on('error', (err) => {
+//         console.error('[Upload] FFmpeg error:', err);
+//         res.status(500).json({ error: err.message });
+//       });
 
-  } catch (err) {
-    console.error('[Upload] Unexpected error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
+//   } catch (err) {
+//     console.error('[Upload] Unexpected error:', err);
+//     res.status(500).json({ error: err.message });
+//   }
+// });
 
 app.get('/audioList', (req, res) => {
   const PCM_FOLDER = pcmFolder
