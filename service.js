@@ -6,7 +6,10 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
+const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffmpeg = require('fluent-ffmpeg');
+
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 const schedule = require("node-schedule");
 
@@ -123,74 +126,81 @@ wss.on('connection', ws => {
   ws.on('close', () => console.log('[Browser] Disconnected'));
 });
 
-// Loop ส่งเสียงไปยัง ESP32 ทุก ๆ 1 ms
+// ปรับ Interval จาก 1ms เป็น 40-50ms เพื่อให้เหมาะสมกับ Buffer ของ ESP32
+// และส่งข้อมูลเป็นก้อนที่ใหญ่ขึ้นเล็กน้อย
 setInterval(() => {
   if (audioQueue.length > 0 && esp32Clients.length > 0) {
-    const chunk = audioQueue.shift();
+    // ดึงออกมาทีละหลายๆ chunk เพื่อส่งทีเดียว
+    const chunksToSend = audioQueue.splice(0, 5); 
+    const finalBuffer = Buffer.concat(chunksToSend);
+
     esp32Clients.forEach(client => {
       try {
-      if(receiveSelected.includes(client.deviceId)) {
-        client.res.write(chunk);
-      }
+        if (receiveSelected.includes(client.deviceId)) {
+          client.res.write(finalBuffer);
+        }
       } catch (err) {
-        console.error('[ERROR] Write to ESP32 failed:', err.message);
+        console.error('[ERROR] WebSocket Stream failed:', err.message);
       }
     });
   }
-}, 1);
+}, 40); // 40ms เป็นค่าที่ปลอดภัยสำหรับ Network ทั่วไป
+
 
 setInterval(() => {
   if (esp32Clients.length > 0) {
-    esp32Clients.forEach(client => {
-      try {
-        receiveList.map(device => {
-          if (device.id === client.deviceId) {
-            device.lastetUpdate = Date.now() + (7 * 60 * 60 * 1000); // อัพเดทเวลาเป็น UTC+7
-          }
-          return device;
-        });
-       
-      } catch (err) {
-        console.error('err', err.message);
+    const now = Date.now() + (7 * 60 * 60 * 1000);
+    
+    // อัปเดตค่าใน Array เดิมโดยตรง
+    receiveList.forEach(device => {
+      const isStillConnected = esp32Clients.some(client => client.deviceId === device.id);
+      if (isStillConnected) {
+        device.lastetUpdate = now;
       }
     });
   }
-}, 15000);// 15 วินาที
+}, 15000); // 15 วินาที
+
 
 // schedule
 
 async function playAudioToESP32(pcmFile, targetDevices = []) {
-  
   const filePath = path.join(pcmFolder, pcmFile);
   if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
 
-  const pcmData = fs.readFileSync(filePath);
-  const chunkSize = 1024;
+  console.log(`[Scheduler] Starting stream: ${pcmFile}`);
 
-  (async () => {
-    esp32Clients.forEach(client => {
+  // ส่งข้อความไปโชว์ที่หน้าจอ ESP32
+  esp32Clients.forEach(client => {
     if (targetDevices.includes(client.deviceId)) {
-      try {
-        esp32Messages[client.deviceId] = "           " + pcmFile;
-        setTimeout(() => {
-          esp32Messages[client.deviceId] = " ";
-        }, 1000*30);
-      } catch {}
+      esp32Messages[client.deviceId] = "           " + pcmFile;
+      setTimeout(() => {
+        esp32Messages[client.deviceId] = " ";
+      }, 1000 * 30);
     }
-    });
+  });
 
+  // ใช้ Stream เพื่ออ่านไฟล์ทีละนิด ไม่กิน RAM
+  const readStream = fs.createReadStream(filePath, { highWaterMark: 1024 }); // อ่านทีละ 1KB
 
-    for (let i = 0; i < pcmData.length; i += chunkSize) {
-      const chunk = pcmData.slice(i, i + chunkSize);
-      esp32Clients.forEach(client => {
-        if (targetDevices.includes(client.deviceId)) {
-          try { client.res.write(chunk); } catch {}
+  for await (const chunk of readStream) {
+    esp32Clients.forEach(client => {
+      if (targetDevices.includes(client.deviceId)) {
+        try {
+          client.res.write(chunk);
+        } catch (e) {
+          console.error(`[Stream Error] Device ${client.deviceId} disconnected`);
         }
-      });
-      await new Promise(r => setTimeout(r, 1));
-    }
-  })();
+      }
+    });
+    // หน่วงเวลาเล็กน้อยเพื่อให้สัมพันธ์กับ Sample Rate (16kHz)
+    // 1024 bytes / (16000 samples/sec * 2 bytes/sample) ≈ 32ms
+    await new Promise(r => setTimeout(r, 30));
+  }
+  
+  console.log(`[Scheduler] Finished stream: ${pcmFile}`);
 }
+
 
 // POST /schedule
 app.post("/schedule", (req, res) => {
