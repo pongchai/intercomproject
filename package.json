@@ -4,6 +4,8 @@
   },
   "scripts": {
     "start": "node service.js"
+    "postinstall": "apt update && apt install -y yt-dlp"
+}
   },
   "dependencies": {
     "@distube/ytdl-core": "^4.16.12",

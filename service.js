@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
+const { spawn } = require('child_process');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffmpeg = require('fluent-ffmpeg');
 
@@ -412,68 +413,52 @@ app.get('/time', (req, res) => {
   });
 });
 
-let Innertube;
-
-async function getYT() {
-  if (!Innertube) {
-    const mod = await import("youtubei.js");
-    Innertube = mod.Innertube;
-  }
-  return Innertube;
-}
-
-app.post('/playYoutubeToDevice', async (req, res) => {
+app.post('/playYoutubeToDevice', (req, res) => {
   const { url, devices } = req.body;
 
   if (!url) {
     return res.status(400).json({ error: "No URL" });
   }
 
-  try {
-    console.log("[YouTube] Start:", url);
+  console.log("[YT-DLP] Start:", url);
 
-    const YT = await getYT();
-    const yt = await YT.create({
-      client_type: "ANDROID"   
-    });
+  const ytdlp = spawn('yt-dlp', [
+    '-f', 'bestaudio',
+    '-o', '-',
+    url
+  ]);
 
-    const stream = await yt.download(url, {
-      type: "audio",
-      quality: "best"
-    });
+  const ffmpegStream = ffmpeg(ytdlp.stdout)
+    .format('s16le')
+    .audioCodec('pcm_s16le')
+    .audioChannels(1)
+    .audioFrequency(16000)
+    .on('error', (err) => {
+      console.error("FFmpeg error:", err);
+    })
+    .pipe();
 
-    const ffmpegStream = ffmpeg(stream)
-      .format('s16le')
-      .audioCodec('pcm_s16le')
-      .audioChannels(1)
-      .audioFrequency(16000)
-      .on('error', (err) => {
-        console.error("FFmpeg error:", err);
-      })
-      .pipe();
-
-    ffmpegStream.on('data', (chunk) => {
-      esp32Clients.forEach(client => {
-        if (devices.includes(client.deviceId)) {
-          try {
-            client.res.write(chunk);
-          } catch (e) {
-            console.error("Send error:", e.message);
-          }
+  ffmpegStream.on('data', (chunk) => {
+    esp32Clients.forEach(client => {
+      if (devices.includes(client.deviceId)) {
+        try {
+          client.res.write(chunk);
+        } catch (e) {
+          console.error("Send error:", e.message);
         }
-      });
+      }
     });
+  });
 
-    ffmpegStream.on('end', () => {
-      console.log("[YouTube] End");
-    });
+  ytdlp.stderr.on('data', (err) => {
+    console.error("[YT-DLP ERROR]", err.toString());
+  });
 
-    res.json({ success: true });
+  ytdlp.on('close', () => {
+    console.log("[YT-DLP] End");
+  });
 
-  } catch (err) {
-    console.error("[YouTube ERROR]", err);
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ success: true });
 });
 
 server.listen(PORT, () => {
