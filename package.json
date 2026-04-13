@@ -3,8 +3,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "start": "node service.js",
-    "postinstall": "apt update && apt install -y yt-dlp"
+    "start": "node service.js"
   },
   "dependencies": {
     "@distube/ytdl-core": "^4.16.12",
