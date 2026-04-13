@@ -412,7 +412,7 @@ app.get('/time', (req, res) => {
   });
 });
 
-const ytdl = require('ytdl-core');
+const ytdl = require('@distube/ytdl-core');
 
 app.post('/playYoutubeToDevice', async (req, res) => {
   const { url, devices } = req.body;
