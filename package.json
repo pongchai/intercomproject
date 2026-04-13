@@ -3,9 +3,8 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "start": "node service.js"
+    "start": "node service.js",
     "postinstall": "apt update && apt install -y yt-dlp"
-}
   },
   "dependencies": {
     "@distube/ytdl-core": "^4.16.12",
@@ -17,7 +16,7 @@
     "multer": "^2.0.2",
     "node-schedule": "^2.1.1",
     "play-dl": "^1.9.7",
-    "pm2": "^6.0.8",
+    "pm2": "^5.0.8",
     "ws": "^8.18.2",
     "youtubei.js": "^17.0.1"
   }
