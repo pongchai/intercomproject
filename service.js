@@ -433,7 +433,9 @@ app.post('/playYoutubeToDevice', async (req, res) => {
     console.log("[YouTube] Start:", url);
 
     const YT = await getYT();
-    const yt = await YT.create();
+    const yt = await YT.create({
+      client_type: "ANDROID"   
+    });
 
     const stream = await yt.download(url, {
       type: "audio",
