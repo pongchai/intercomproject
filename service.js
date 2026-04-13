@@ -35,7 +35,7 @@ app.use((req, res, next) => {
 app.use(cors());
 app.use(express.json()); // <-- Add this line
 
-const PORT = process.env.PORT || 8097;
+const PORT = process.env.PORT || 8080;
 
 const esp32Clients = [];
 const audioQueue = [];
@@ -410,6 +410,58 @@ app.get('/time', (req, res) => {
     // ส่งกลับเวลา HH:MM:SS ตามที่ต้องการ
     thailand_time 
   });
+});
+
+const ytdl = require('ytdl-core');
+
+app.post('/playYoutubeToDevice', async (req, res) => {
+  const { url, devices } = req.body;
+
+  if (!url) {
+    return res.status(400).json({ error: "No URL" });
+  }
+
+  try {
+    console.log("[YouTube] Start:", url);
+
+    const stream = ytdl(url, {
+      filter: 'audioonly',
+      quality: 'highestaudio',
+      highWaterMark: 1 << 25   // 🔥 สำคัญมาก
+    });
+
+    const ffmpegStream = ffmpeg(stream)
+      .format('s16le')
+      .audioCodec('pcm_s16le')
+      .audioChannels(1)
+      .audioFrequency(16000)
+      .on('error', (err) => {
+        console.error("FFmpeg error:", err);
+      })
+      .pipe();
+
+    ffmpegStream.on('data', (chunk) => {
+      esp32Clients.forEach(client => {
+        if (devices.includes(client.deviceId)) {
+          try {
+            client.res.write(chunk);
+          } catch (e) {
+            console.error("Send error:", e.message);
+          }
+        }
+      });
+    });
+
+    ffmpegStream.on('end', () => {
+      console.log("[YouTube] End");
+    });
+
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 server.listen(PORT, () => {
