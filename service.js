@@ -412,7 +412,15 @@ app.get('/time', (req, res) => {
   });
 });
 
-const { Innertube } = require("youtubei.js");
+let Innertube;
+
+async function getYT() {
+  if (!Innertube) {
+    const mod = await import("youtubei.js");
+    Innertube = mod.Innertube;
+  }
+  return Innertube;
+}
 
 app.post('/playYoutubeToDevice', async (req, res) => {
   const { url, devices } = req.body;
@@ -424,7 +432,8 @@ app.post('/playYoutubeToDevice', async (req, res) => {
   try {
     console.log("[YouTube] Start:", url);
 
-    const yt = await Innertube.create();
+    const YT = await getYT();
+    const yt = await YT.create();
 
     const stream = await yt.download(url, {
       type: "audio",
