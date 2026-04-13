@@ -412,7 +412,7 @@ app.get('/time', (req, res) => {
   });
 });
 
-const ytdl = require('@distube/ytdl-core');
+const { Innertube } = require("youtubei.js");
 
 app.post('/playYoutubeToDevice', async (req, res) => {
   const { url, devices } = req.body;
@@ -424,10 +424,11 @@ app.post('/playYoutubeToDevice', async (req, res) => {
   try {
     console.log("[YouTube] Start:", url);
 
-    const stream = ytdl(url, {
-      filter: 'audioonly',
-      quality: 'highestaudio',
-      highWaterMark: 1 << 25   // 🔥 สำคัญมาก
+    const yt = await Innertube.create();
+
+    const stream = await yt.download(url, {
+      type: "audio",
+      quality: "best"
     });
 
     const ffmpegStream = ffmpeg(stream)
@@ -459,7 +460,7 @@ app.post('/playYoutubeToDevice', async (req, res) => {
     res.json({ success: true });
 
   } catch (err) {
-    console.error(err);
+    console.error("[YouTube ERROR]", err);
     res.status(500).json({ error: err.message });
   }
 });
