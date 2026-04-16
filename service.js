@@ -413,11 +413,17 @@ app.get('/time', (req, res) => {
   });
 });
 
+let currentProcess = null;
 app.post('/playYoutubeToDevice', (req, res) => {
   const { url, devices } = req.body;
 
   if (!url) {
     return res.status(400).json({ error: "No URL" });
+  }
+
+  if (currentProcess) {
+    console.log("⛔ Stop old stream");
+    currentProcess.kill();
   }
 
   console.log("[YT-DLP] Start:", url);
@@ -427,6 +433,11 @@ app.post('/playYoutubeToDevice', (req, res) => {
     '-o', '-',
     url
   ]);
+  
+  const killTimeout = setTimeout(() => {
+    console.log("⛔ kill yt-dlp (timeout)");
+    ytdlp.kill();
+  }, 1000 * 60 * 10); // 10 นาที
 
   const ffmpegStream = ffmpeg(ytdlp.stdout)
     .format('s16le')
@@ -440,7 +451,7 @@ app.post('/playYoutubeToDevice', (req, res) => {
 
   ffmpegStream.on('data', (chunk) => {
     esp32Clients.forEach(client => {
-      if (devices.includes(client.deviceId)) {
+      if (!devices || devices.includes(client.deviceId)) {
         try {
           client.res.write(chunk);
         } catch (e) {
@@ -450,13 +461,23 @@ app.post('/playYoutubeToDevice', (req, res) => {
     });
   });
 
-  ytdlp.stderr.on('data', (err) => {
-    console.error("[YT-DLP ERROR]", err.toString());
-  });
+ffmpegStream.on('end', () => {
+  console.log("[FFmpeg] Stream ended");
+});
 
-  ytdlp.on('close', () => {
-    console.log("[YT-DLP] End");
-  });
+ytdlp.stderr.on('data', (err) => {
+  console.error("[YT-DLP ERROR]", err.toString());
+});
+
+ytdlp.on('error', (err) => {
+  console.error("[YT-DLP PROCESS ERROR]", err);
+});
+
+ytdlp.on('close', () => {
+  clearTimeout(killTimeout);
+  currentProcess = null;
+  console.log("[YT-DLP] End");
+});
 
   res.json({ success: true });
 });
