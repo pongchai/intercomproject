@@ -25,6 +25,7 @@ if (!fs.existsSync(pcmFolder)) fs.mkdirSync(pcmFolder);
 
 
 const app = express();
+let streamStartTime = 0;
 
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
@@ -414,6 +415,9 @@ app.get('/time', (req, res) => {
 });
 
 let currentProcess = null;
+// 🔥 กำหนดเวลาเริ่ม (ล่วงหน้า 2 วิ)
+streamStartTime = Date.now() + 2000;
+console.log("🎯 startTime:", streamStartTime);
 app.post('/playYoutubeToDevice', (req, res) => {
   const { url, devices } = req.body;
 
@@ -433,7 +437,7 @@ app.post('/playYoutubeToDevice', (req, res) => {
     '-o', '-',
     url
   ]);
-  
+
   const killTimeout = setTimeout(() => {
     console.log("⛔ kill yt-dlp (timeout)");
     ytdlp.kill();
@@ -479,7 +483,13 @@ ytdlp.on('close', () => {
   console.log("[YT-DLP] End");
 });
 
-  res.json({ success: true });
+res.json({
+  success: true,
+  startTime: streamStartTime
+});
+
+app.get('/syncTime', (req, res) => {
+  res.json({ startTime: streamStartTime });
 });
 
 server.listen(PORT, () => {
