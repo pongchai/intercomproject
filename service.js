@@ -415,15 +415,17 @@ app.get('/time', (req, res) => {
 });
 
 let currentProcess = null;
-// 🔥 กำหนดเวลาเริ่ม (ล่วงหน้า 2 วิ)
-streamStartTime = Date.now() + 2000;
-console.log("🎯 startTime:", streamStartTime);
+
 app.post('/playYoutubeToDevice', (req, res) => {
   const { url, devices } = req.body;
 
   if (!url) {
     return res.status(400).json({ error: "No URL" });
   }
+  
+  // 🔥 กำหนดเวลาเริ่ม (ล่วงหน้า 2 วิ)
+  streamStartTime = Date.now() + 2000;
+  console.log("🎯 startTime:", streamStartTime);
 
   if (currentProcess) {
     console.log("⛔ Stop old stream");
@@ -486,6 +488,8 @@ ytdlp.on('close', () => {
 res.json({
   success: true,
   startTime: streamStartTime
+});
+
 });
 
 app.get('/syncTime', (req, res) => {
