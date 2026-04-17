@@ -41,6 +41,8 @@ const PORT = process.env.PORT || 8080;
 
 const esp32Clients = [];
 const audioQueue = [];
+const MAX_QUEUE = 200;
+
 let receiveList = [
   // { id: 'device1', name: 'Device 1', ImageBase64: '', isConnect: 'timestamp' },
 ];
@@ -51,40 +53,35 @@ let receiveSelected = [
 
 // Route สำหรับ ESP32 เข้ามารับ stream
 app.get('/stream', async (req, res) => {
-  console.log('[ESP32] Connected to /stream');
-  const deviceId = req?.query?.deviceId;
-  const now = Date.now() + (7 * 60 * 60 * 1000); // เวลาในเขต Bangkok  (UTC+7)
-  if (receiveList.filter(device => device.id === deviceId).length === 0) {
-    receiveList.push({ id: deviceId, name: '', ImageBase64: '', lastetUpdate: now });
-  } else {
-    // ถ้ามีอยู่แล้ว ให้ set isConnect = timestamp ล่าสุด
-    receiveList = receiveList.map(device =>
-      device.id === deviceId ? { ...device, lastetUpdate: now } : device
-    );
+  try {
+    const deviceId = req?.query?.deviceId;
+
+    if (!deviceId) {
+      return res.status(400).end();
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Connection': 'keep-alive'
+    });
+
+    const keepAlive = setInterval(() => {
+      if (!res.writableEnded) {
+        res.write(" ");
+      }
+    }, 2000);
+
+    esp32Clients.push({ deviceId, res });
+
+    req.on('close', () => {
+      clearInterval(keepAlive);
+      const index = esp32Clients.findIndex(c => c.res === res);
+      if (index !== -1) esp32Clients.splice(index, 1);
+    });
+
+  } catch (err) {
+    console.error("🔥 STREAM ERROR:", err);
   }
-  console.log('Device ID:', deviceId);
-
-  res.writeHead(200, {
-    'Content-Type': 'application/octet-stream',
-    'Connection': 'keep-alive'
-  });
-
-  const keepAlive = setInterval(() => {
-    try {
-      res.write(" "); // กัน Railway ตัด connection
-    } catch (e) {}
-  }, 2000);
-
-  esp32Clients.push({ deviceId, res });
-
-  req.on('close', async () => {
-    console.log('[ESP32] Disconnected');
-    // ไม่ต้องเปลี่ยนค่า isConnect ให้เก็บ timestamp ล่าสุดไว้
-    clearInterval(keepAlive);
-    
-    const index = esp32Clients.findIndex(client => client.res === res);
-    if (index !== -1) esp32Clients.splice(index, 1);
-  });
 });
 
 app.get('/receiveList', (req, res) => {
@@ -123,7 +120,9 @@ wss.on('connection', ws => {
   ws.on('message', msg => {
     const buffer = Buffer.from(msg);
     // const cleanedBuffer = removeCRLF(buffer); // ✅ ใช้งานจริง
-    audioQueue.push(buffer);
+    if (audioQueue.length < MAX_QUEUE) {
+      audioQueue.push(buffer);
+    }
   });
   ws.on('close', () => console.log('[Browser] Disconnected'));
 });
@@ -498,4 +497,12 @@ app.get('/syncTime', (req, res) => {
 
 server.listen(PORT, () => {
   console.log("Server running on port", PORT);
+});
+
+process.on('uncaughtException', err => {
+  console.error('🔥 UNCAUGHT EXCEPTION:', err);
+});
+
+process.on('unhandledRejection', err => {
+  console.error('🔥 UNHANDLED REJECTION:', err);
 });
