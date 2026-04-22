@@ -1,12 +1,10 @@
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
-const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
-const { spawn } = require('child_process');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffmpeg = require('fluent-ffmpeg');
 
@@ -41,7 +39,7 @@ const PORT = process.env.PORT || 8080;
 
 const esp32Clients = [];
 const audioQueue = [];
-const MAX_QUEUE = 200;
+const MAX_QUEUE = 50;
 
 let receiveList = [
   // { id: 'device1', name: 'Device 1', ImageBase64: '', isConnect: 'timestamp' },
@@ -54,6 +52,8 @@ let receiveSelected = [
 // Route สำหรับ ESP32 เข้ามารับ stream
 app.get('/stream', async (req, res) => {
   try {
+    req.setTimeout(0);
+
     const deviceId = req?.query?.deviceId;
 
     if (!deviceId) {
@@ -71,7 +71,15 @@ app.get('/stream', async (req, res) => {
       }
     }, 2000);
 
-    esp32Clients.push({ deviceId, res });
+    const index = esp32Clients.findIndex(c => c.deviceId === deviceId);
+
+    if (index !== -1) {
+      console.log("♻️ replace old connection:", deviceId);
+      esp32Clients[index].res.end();
+      esp32Clients[index] = { deviceId, res };
+    } else {
+      esp32Clients.push({ deviceId, res });
+    }
 
     req.on('close', () => {
       clearInterval(keepAlive);
@@ -90,16 +98,26 @@ app.get('/receiveList', (req, res) => {
 
 app.post('/updateReceive', (req, res) => {
   const payload = req.body;
-  console.log('[UPDATE] Received payload:', payload);
-  if(payload.id) {
-    receiveList = receiveList.map(device => {
-      if(device.id === payload.id) {
-        return { ...device, name: payload.name, ImageBase64: payload.ImageBase64 || '' };
-      }
-      return device;
-    })
+
+  const index = receiveList.findIndex(d => d.id === payload.id);
+
+  if (index !== -1) {
+    receiveList[index] = {
+      ...receiveList[index],
+      name: payload.name,
+      ImageBase64: payload.ImageBase64 || ''
+    };
+  } else {
+    // 🔥 เพิ่มใหม่
+    receiveList.push({
+      id: payload.id,
+      name: payload.name || payload.id,
+      ImageBase64: payload.ImageBase64 || '',
+      lastetUpdate: Date.now()
+    });
   }
-  res.status(200).json({ receiveList: receiveList});
+
+  res.json({ receiveList });
 });
 
 app.post('/selectedReceive', (req, res) => {
@@ -119,10 +137,22 @@ wss.on('connection', ws => {
   console.log('[Browser] WebSocket connected');
   ws.on('message', msg => {
     const buffer = Buffer.from(msg);
-    // const cleanedBuffer = removeCRLF(buffer); // ✅ ใช้งานจริง
-    if (audioQueue.length < MAX_QUEUE) {
-      audioQueue.push(buffer);
+
+    const queueLen = audioQueue.length;
+
+    if (queueLen > MAX_QUEUE) {
+      console.log("🔥 overflow → trim queue");
+      audioQueue.splice(0, Math.floor(queueLen / 2));
+    } else if (queueLen > 20) {
+      console.log("⚠️ mild lag → drop half");
+      audioQueue.splice(0, Math.floor(queueLen / 2));
     }
+
+    if (audioQueue.length >= MAX_QUEUE) {
+      audioQueue.shift();
+    }
+
+    audioQueue.push(buffer);
   });
   ws.on('close', () => console.log('[Browser] Disconnected'));
 });
@@ -130,22 +160,60 @@ wss.on('connection', ws => {
 // ปรับ Interval จาก 1ms เป็น 40-50ms เพื่อให้เหมาะสมกับ Buffer ของ ESP32
 // และส่งข้อมูลเป็นก้อนที่ใหญ่ขึ้นเล็กน้อย
 setInterval(() => {
-  if (audioQueue.length > 0 && esp32Clients.length > 0) {
-    // ดึงออกมาทีละหลายๆ chunk เพื่อส่งทีเดียว
-    const chunksToSend = audioQueue.splice(0, 5); 
+
+  // 🔥 STEP 1: ไม่มี client → หยุด stream ทันที
+  if (esp32Clients.length === 0) {
+    console.log("🛑 no clients → stop stream");
+
+    try {
+      currentStream.destroy();
+    } catch (e) {}
+
+    if (currentFFmpeg) {
+      try {
+        currentFFmpeg.kill('SIGKILL');
+      } catch (e) {}
+    }
+
+    currentStream = null;
+    currentFFmpeg = null;
+    isPlaying = false;
+  }
+
+  // 🔥 debug log (สุ่ม)
+  if (Math.random() < 0.1) {
+    console.log("Queue:", audioQueue.length, "Clients:", esp32Clients.length);
+  }
+
+  // 🔥 STEP 2: ส่งเสียงปกติ
+  if (
+    audioQueue.length > 0 &&
+    esp32Clients.length > 0 &&
+    Array.isArray(receiveSelected)
+  ) {
+    const chunksToSend = audioQueue.splice(0, 2);
     const finalBuffer = Buffer.concat(chunksToSend);
 
     esp32Clients.forEach(client => {
       try {
-        if (receiveSelected.includes(client.deviceId)) {
-          client.res.write(finalBuffer);
+        if (
+          receiveSelected.length === 0 ||
+          receiveSelected.includes(client.deviceId)
+        ) {
+          if (!client.res.writableEnded) {
+            const ok = client.res.write(finalBuffer);
+            if (!ok) {
+              console.log("⚠️ slow client:", client.deviceId);
+            }
+          }
         }
       } catch (err) {
-        console.error('[ERROR] WebSocket Stream failed:', err.message);
+        console.error('[ERROR] Stream failed:', err.message);
       }
     });
   }
-}, 40); // 40ms เป็นค่าที่ปลอดภัยสำหรับ Network ทั่วไป
+
+}, 40);
 
 
 setInterval(() => {
@@ -186,11 +254,16 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
 
   for await (const chunk of readStream) {
     esp32Clients.forEach(client => {
-      if (targetDevices.includes(client.deviceId)) {
-        try {
-          client.res.write(chunk);
-        } catch (e) {
-          console.error(`[Stream Error] Device ${client.deviceId} disconnected`);
+      if (
+        targetDevices.length === 0 ||
+        targetDevices.includes(client.deviceId)
+      ) {
+        if (!client.res.writableEnded) {
+          try {
+            client.res.write(chunk);
+          } catch (e) {
+            console.error("write fail:", client.deviceId);
+          }
         }
       }
     });
@@ -209,8 +282,7 @@ app.post("/schedule", (req, res) => {
   if (!fileName || !schedAt) return res.status(400).json({ error: "Missing fields" });
 
   const id = Date.now();
-  const schedAtUTC = new Date(schedAt + "+07:00").toISOString();
-  const jobTime = new Date(schedAtUTC)
+  const jobTime = new Date(schedAt);
   console.log("[Scheduler] Schedule job at:", jobTime.toString());
 
   const job = schedule.scheduleJob(jobTime, async () => {
@@ -224,10 +296,14 @@ app.post("/schedule", (req, res) => {
     if (mode === "ครั้งเดียว") {
       scheduleList = scheduleList.filter(i => i.id !== id);
     } else if (mode === "ทุกวัน") {
-      const next = new Date(jobTime.getTime() + 24*60*60*1000);
-      scheduleList = scheduleList.map(i => i.id === id ? { ...i, schedAt: next.toISOString() } : i);
-      schedule.scheduleJob(next, async () => await playAudioToESP32(fileName, devices || [] ));
-    }
+        const next = new Date(jobTime.getTime() + 24*60*60*1000);
+
+        schedule.scheduleJob(next, async () => {
+          await playAudioToESP32(fileName, devices || []);
+        });
+
+        // 🔥 ไม่ต้อง push ใหม่
+      }
   });
 
   scheduleList.push({ id, fileName, schedAt, mode, job });
@@ -251,8 +327,7 @@ app.put("/schedule/:id", (req, res) => {
   item.mode = mode;
 
   // Reschedule job
-  const schedAtUTC = new Date(schedAt + "+07:00").toISOString();
-  const jobTime = new Date(schedAtUTC);
+  const jobTime = new Date(schedAt);
   item.job = schedule.scheduleJob(jobTime, async () => {
     await playAudioToESP32(fileName);
     if (mode === "ครั้งเดียว") {
@@ -260,7 +335,9 @@ app.put("/schedule/:id", (req, res) => {
     } else if (mode === "ทุกวัน") {
       const next = new Date(jobTime.getTime() + 24*60*60*1000);
       item.schedAt = next.toISOString();
-      item.job = schedule.scheduleJob(next, async () => await playAudioToESP32(fileName));
+      item.job = schedule.scheduleJob(next, async () => {
+        await playAudioToESP32(fileName);
+      });
     }
   });
 
@@ -303,7 +380,7 @@ app.post('/uploadAudio', upload.single('file'), async (req, res) => {
   console.log(req.file);
   
   const originalName = req.file.originalname.replace(/\.[^/.]+$/, "");
-  const outputName = originalName + '.pcm';
+  const outputName = `${Date.now()}_${originalName}.pcm`;
   const outputPath = path.join(pcmFolder, outputName);
 
   try {
@@ -413,82 +490,136 @@ app.get('/time', (req, res) => {
   });
 });
 
-let currentProcess = null;
+const ytdl = require('@distube/ytdl-core');
 
-app.post('/playYoutubeToDevice', (req, res) => {
+let currentStream = null;
+let currentFFmpeg = null;
+let isPlaying = false;
+
+app.post('/playYoutubeToDevice', async (req, res) => {
   const { url, devices } = req.body;
 
-  if (!url) {
-    return res.status(400).json({ error: "No URL" });
-  }
-  
-  // 🔥 กำหนดเวลาเริ่ม (ล่วงหน้า 2 วิ)
-  streamStartTime = Date.now() + 2000;
-  console.log("🎯 startTime:", streamStartTime);
+  if (!url) return res.status(400).json({ error: "No URL" });
 
-  if (currentProcess) {
-    console.log("⛔ Stop old stream");
-    currentProcess.kill();
-  }
+  try {
+    // 🔥 kill ของเก่า
+    if (currentStream) {
+      try { currentStream.destroy(); } catch (e) {}
+      currentStream = null;
+    }
 
-  console.log("[YT-DLP] Start:", url);
+    if (currentFFmpeg) {
+      try { currentFFmpeg.kill('SIGKILL'); } catch (e) {}
+      currentFFmpeg = null;
+    }
 
-  const ytdlp = spawn('yt-dlp', [
-    '-f', 'bestaudio',
-    '-o', '-',
-    url
-  ]);
+    if (isPlaying) {
+      console.log("⚠️ already playing → restart");
+    }
 
-  const killTimeout = setTimeout(() => {
-    console.log("⛔ kill yt-dlp (timeout)");
-    ytdlp.kill();
-  }, 1000 * 60 * 10); // 10 นาที
+    isPlaying = true;
 
-  const ffmpegStream = ffmpeg(ytdlp.stdout)
-    .format('s16le')
-    .audioCodec('pcm_s16le')
-    .audioChannels(1)
-    .audioFrequency(16000)
-    .on('error', (err) => {
-      console.error("FFmpeg error:", err);
-    })
-    .pipe();
-
-  ffmpegStream.on('data', (chunk) => {
-    esp32Clients.forEach(client => {
-      if (!devices || devices.includes(client.deviceId)) {
-        try {
-          client.res.write(chunk);
-        } catch (e) {
-          console.error("Send error:", e.message);
-        }
-      }
+    currentStream = ytdl(url, {
+      filter: 'audioonly',
+      quality: 'highestaudio'
     });
-  });
 
-ffmpegStream.on('end', () => {
-  console.log("[FFmpeg] Stream ended");
-});
+    currentFFmpeg = ffmpeg(currentStream);
 
-ytdlp.stderr.on('data', (err) => {
-  console.error("[YT-DLP ERROR]", err.toString());
-});
+    const ffmpegStream = currentFFmpeg
+      .format('s16le')
+      .audioCodec('pcm_s16le')
+      .audioChannels(1)
+      .audioFrequency(16000)
+      .on('error', err => console.error("FFmpeg error:", err))
+      .pipe();
 
-ytdlp.on('error', (err) => {
-  console.error("[YT-DLP PROCESS ERROR]", err);
-});
+    // 🔥 WATCHDOG
+    const watchdog = setTimeout(() => {
+      console.log("⏱ watchdog: force stop");
 
-ytdlp.on('close', () => {
-  clearTimeout(killTimeout);
-  currentProcess = null;
-  console.log("[YT-DLP] End");
-});
+      if (currentStream) currentStream.destroy();
+      if (currentFFmpeg) {
+        try { currentFFmpeg.kill('SIGKILL'); } catch (e) {}
+      }
 
-res.json({
-  success: true,
-  startTime: streamStartTime
-});
+      currentStream = null;
+      currentFFmpeg = null;
+      isPlaying = false;
 
+    }, 1000 * 60 * 10);
+
+    // 🔥 END
+    ffmpegStream.on('end', () => {
+      console.log("[FFmpeg] ended");
+
+      clearTimeout(watchdog);
+
+      currentStream = null;
+      currentFFmpeg = null;
+      isPlaying = false;
+    });
+
+    // 🔥 ERROR
+    ffmpegStream.on('error', (err) => {
+      console.error("[FFmpeg Stream Error]", err);
+
+      clearTimeout(watchdog);
+
+      currentStream = null;
+      currentFFmpeg = null;
+      isPlaying = false;
+    });
+
+    // 🔥 PROCESS CLOSE
+    currentFFmpeg.on('close', () => {
+      console.log("[FFmpeg] process closed");
+      currentFFmpeg = null;
+    });
+
+    // 🔥 ส่งเสียง
+    ffmpegStream.on('data', (chunk) => {
+
+    // 🔥 ไม่มี client → หยุด YouTube ทันที
+      if (esp32Clients.length === 0) {
+        console.log("🛑 no clients → stop youtube stream");
+
+        if (currentStream) {
+          try { currentStream.destroy(); } catch (e) {}
+        }
+
+        if (currentFFmpeg) {
+          try { currentFFmpeg.kill('SIGKILL'); } catch (e) {}
+        }
+
+        currentStream = null;
+        currentFFmpeg = null;
+        isPlaying = false;
+
+        return;
+      }
+
+      // 🔥 ส่งเสียงปกติ
+      esp32Clients.forEach(client => {
+        if (!devices || devices.includes(client.deviceId)) {
+          if (!client.res.writableEnded) {
+            try {
+              client.res.write(chunk);
+            } catch (e) {
+              console.error("write fail:", client.deviceId);
+            }
+          }
+        }
+      });
+
+    });
+
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error("YT ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/syncTime', (req, res) => {
@@ -498,6 +629,19 @@ app.get('/syncTime', (req, res) => {
 server.listen(PORT, () => {
   console.log("Server running on port", PORT);
 });
+
+setInterval(() => {
+  for (let i = esp32Clients.length - 1; i >= 0; i--) {
+    if (
+      !esp32Clients[i].res ||
+      esp32Clients[i].res.writableEnded ||
+      esp32Clients[i].res.destroyed
+    ) {
+      console.log("🧹 remove dead client:", esp32Clients[i].deviceId);
+      esp32Clients.splice(i, 1);
+    }
+  }
+}, 10000);
 
 process.on('uncaughtException', err => {
   console.error('🔥 UNCAUGHT EXCEPTION:', err);
