@@ -75,8 +75,8 @@ app.get('/stream', async (req, res) => {
 
     if (index !== -1) {
       console.log("♻️ replace old connection:", deviceId);
-      esp32Clients[index].res.end();
-      esp32Clients[index] = { deviceId, res };
+
+      esp32Clients[index].res = res; 
     } else {
       esp32Clients.push({ deviceId, res });
     }
@@ -163,10 +163,17 @@ wss.on('connection', ws => {
     }
 
     if (audioQueue.length >= MAX_QUEUE) {
+      console.log("🔥 queue full → drop oldest");
       audioQueue.shift();
     }
 
     audioQueue.push(buffer);
+
+    if (audioQueue.length < MAX_QUEUE) {
+      audioQueue.push(buffer);
+    } else {
+      console.log("🔥 drop audio (queue full)");
+    }
   });
   ws.on('close', () => console.log('[Browser] Disconnected'));
 });
@@ -180,7 +187,13 @@ setInterval(() => {
     console.log("🛑 no clients → stop stream");
 
     try {
-      currentStream.destroy();
+      if (currentStream && typeof currentStream.destroy === 'function') {
+        try {
+          currentStream.destroy();
+        } catch (e) {
+          console.error("destroy error:", e);
+        }
+      }
     } catch (e) {}
 
     if (currentFFmpeg) {
@@ -227,7 +240,7 @@ setInterval(() => {
     });
   }
 
-}, 40);
+}, 50);
 
 
 setInterval(() => {
@@ -596,21 +609,28 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
     // 🔥 ไม่มี client → หยุด YouTube ทันที
       if (esp32Clients.length === 0) {
-        console.log("🛑 no clients → stop youtube stream");
+        console.log("🛑 no clients → stop stream");
 
-        if (currentStream) {
-          try { currentStream.destroy(); } catch (e) {}
+        // ✅ FIX: เช็คก่อน destroy
+        if (currentStream && typeof currentStream.destroy === 'function') {
+          try {
+            currentStream.destroy();
+          } catch (e) {
+            console.error("destroy currentStream error:", e);
+          }
         }
 
         if (currentFFmpeg) {
-          try { currentFFmpeg.kill('SIGKILL'); } catch (e) {}
+          try {
+            currentFFmpeg.kill('SIGKILL');
+          } catch (e) {
+            console.error("kill ffmpeg error:", e);
+          }
         }
 
         currentStream = null;
         currentFFmpeg = null;
         isPlaying = false;
-
-        return;
       }
 
       // 🔥 ส่งเสียงปกติ
@@ -656,6 +676,11 @@ setInterval(() => {
     }
   }
 }, 10000);
+
+// ลบ device ที่ไม่ได้เชื่อมต่อแล้ว
+receiveList = receiveList.filter(d =>
+  esp32Clients.some(c => c.deviceId === d.id)
+);
 
 process.on('uncaughtException', err => {
   console.error('🔥 UNCAUGHT EXCEPTION:', err);
