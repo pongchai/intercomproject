@@ -81,6 +81,20 @@ app.get('/stream', async (req, res) => {
       esp32Clients.push({ deviceId, res });
     }
 
+    // 🔥 เพิ่ม device เข้า receiveList อัตโนมัติ
+const existsDevice = receiveList.find(d => d.id === deviceId);
+
+if (!existsDevice) {
+  console.log("➕ add device to receiveList:", deviceId);
+
+  receiveList.push({
+    id: deviceId,
+    name: deviceId,
+    ImageBase64: '',
+    lastetUpdate: Date.now()
+  });
+}
+
     req.on('close', () => {
       clearInterval(keepAlive);
       const index = esp32Clients.findIndex(c => c.res === res);
