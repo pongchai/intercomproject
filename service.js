@@ -82,18 +82,18 @@ app.get('/stream', async (req, res) => {
     }
 
     // 🔥 เพิ่ม device เข้า receiveList อัตโนมัติ
-const existsDevice = receiveList.find(d => d.id === deviceId);
+    const existsDevice = receiveList.find(d => d.id === deviceId);
 
-if (!existsDevice) {
-  console.log("➕ add device to receiveList:", deviceId);
+    if (!existsDevice) {
+      console.log("➕ add device to receiveList:", deviceId);
 
-  receiveList.push({
-    id: deviceId,
-    name: deviceId,
-    ImageBase64: '',
-    lastetUpdate: Date.now()
-  });
-}
+      receiveList.push({
+        id: deviceId,
+        name: deviceId,
+        ImageBase64: '',
+        lastetUpdate: Date.now()
+      });
+    }
 
     req.on('close', () => {
       clearInterval(keepAlive);
