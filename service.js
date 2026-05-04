@@ -59,7 +59,7 @@ app.get('/stream', async (req, res) => {
     if (!deviceId) {
       return res.status(400).end();
     }
-
+    streamStartTime = Date.now();
     res.writeHead(200, {
       'Content-Type': 'application/octet-stream',
       'Connection': 'keep-alive'
@@ -657,7 +657,7 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 });
 
 app.get('/syncTime', (req, res) => {
-  res.json({ startTime: streamStartTime });
+  res.json({ startTime: Date.now() });
 });
 
 server.listen(PORT, () => {
