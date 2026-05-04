@@ -517,7 +517,8 @@ app.get('/time', (req, res) => {
   });
 });
 
-const ytdl = require('@distube/ytdl-core');
+//const ytdl = require('@distube/ytdl-core');
+const { spawn } = require('child_process');
 
 let currentStream = null;
 let currentFFmpeg = null;
@@ -525,133 +526,99 @@ let isPlaying = false;
 
 app.post('/playYoutubeToDevice', async (req, res) => {
   const { url, devices } = req.body;
-
   if (!url) return res.status(400).json({ error: "No URL" });
 
   try {
     // 🔥 kill ของเก่า
-    if (currentStream) {
-      try { currentStream.destroy(); } catch (e) {}
-      currentStream = null;
-    }
-
     if (currentFFmpeg) {
       try { currentFFmpeg.kill('SIGKILL'); } catch (e) {}
       currentFFmpeg = null;
     }
-
-    if (isPlaying) {
-      console.log("⚠️ already playing → restart");
+    if (currentStream) {
+      try { currentStream.kill('SIGKILL'); } catch (e) {}
+      currentStream = null;
     }
 
     isPlaying = true;
 
-    currentStream = ytdl(url, {
-      filter: 'audioonly',
-      quality: 'highestaudio'
+    // 🔥 ดึง audio URL จาก yt-dlp
+    const ytDlp = spawn('yt-dlp', [
+      '-f', 'bestaudio',
+      '--get-url',
+      url
+    ]);
+
+    let audioUrl = '';
+
+    ytDlp.stdout.on('data', (data) => {
+      audioUrl += data.toString().trim();
     });
 
-    currentFFmpeg = ffmpeg(currentStream);
-
-    const ffmpegStream = currentFFmpeg
-      .format('s16le')
-      .audioCodec('pcm_s16le')
-      .audioChannels(1)
-      .audioFrequency(16000)
-      .on('error', err => console.error("FFmpeg error:", err))
-      .pipe();
-
-    // 🔥 WATCHDOG
-    const watchdog = setTimeout(() => {
-      console.log("⏱ watchdog: force stop");
-
-      if (currentStream) currentStream.destroy();
-      if (currentFFmpeg) {
-        try { currentFFmpeg.kill('SIGKILL'); } catch (e) {}
-      }
-
-      currentStream = null;
-      currentFFmpeg = null;
-      isPlaying = false;
-
-    }, 1000 * 60 * 10);
-
-    // 🔥 END
-    ffmpegStream.on('end', () => {
-      console.log("[FFmpeg] ended");
-
-      clearTimeout(watchdog);
-
-      currentStream = null;
-      currentFFmpeg = null;
-      isPlaying = false;
+    ytDlp.stderr.on('data', (data) => {
+      console.error('yt-dlp error:', data.toString());
     });
 
-    // 🔥 ERROR
-    ffmpegStream.on('error', (err) => {
-      console.error("[FFmpeg Stream Error]", err);
-
-      clearTimeout(watchdog);
-
-      currentStream = null;
-      currentFFmpeg = null;
-      isPlaying = false;
-    });
-
-    // 🔥 PROCESS CLOSE
-    currentFFmpeg.on('close', () => {
-      console.log("[FFmpeg] process closed");
-      currentFFmpeg = null;
-    });
-
-    // 🔥 ส่งเสียง
-    ffmpegStream.on('data', (chunk) => {
-
-    // 🔥 ไม่มี client → หยุด YouTube ทันที
-      if (esp32Clients.length === 0) {
-        console.log("🛑 no clients → stop stream");
-
-        // ✅ FIX: เช็คก่อน destroy
-        if (currentStream && typeof currentStream.destroy === 'function') {
-          try {
-            currentStream.destroy();
-          } catch (e) {
-            console.error("destroy currentStream error:", e);
-          }
-        }
-
-        if (currentFFmpeg) {
-          try {
-            currentFFmpeg.kill('SIGKILL');
-          } catch (e) {
-            console.error("kill ffmpeg error:", e);
-          }
-        }
-
-        currentStream = null;
-        currentFFmpeg = null;
+    ytDlp.on('close', (code) => {
+      if (code !== 0 || !audioUrl) {
+        console.error('yt-dlp failed');
         isPlaying = false;
+        return res.status(500).json({ error: 'yt-dlp failed' });
       }
 
-      // 🔥 ส่งเสียงปกติ
-      esp32Clients.forEach(client => {
-        if (!devices || devices.includes(client.deviceId)) {
-          if (!client.res.writableEnded) {
-            try {
-              client.res.write(chunk);
-            } catch (e) {
-              console.error("write fail:", client.deviceId);
+      console.log('Audio URL:', audioUrl);
+
+      // 🔥 ส่งผ่าน ffmpeg แปลงเป็น PCM
+      const ffmpegProc = ffmpeg(audioUrl)
+        .format('s16le')
+        .audioCodec('pcm_s16le')
+        .audioChannels(1)
+        .audioFrequency(16000)
+        .on('error', (err) => {
+          console.error('FFmpeg error:', err);
+          isPlaying = false;
+          currentFFmpeg = null;
+        });
+
+      currentFFmpeg = ffmpegProc;
+
+      const ffmpegStream = ffmpegProc.pipe();
+
+      ffmpegStream.on('data', (chunk) => {
+        if (esp32Clients.length === 0) {
+          try { currentFFmpeg.kill('SIGKILL'); } catch (e) {}
+          currentFFmpeg = null;
+          isPlaying = false;
+          return;
+        }
+
+        esp32Clients.forEach(client => {
+          if (!devices || devices.includes(client.deviceId)) {
+            if (!client.res.writableEnded) {
+              try {
+                client.res.write(chunk);
+              } catch (e) {
+                console.error('write fail:', client.deviceId);
+              }
             }
           }
-        }
+        });
       });
 
+      ffmpegStream.on('end', () => {
+        console.log('YouTube stream ended');
+        currentFFmpeg = null;
+        isPlaying = false;
+      });
+
+      // ตอบ client ก่อนเลย ไม่ต้องรอ stream จบ
+      if (!res.headersSent) {
+        res.json({ success: true });
+      }
     });
 
-    res.json({ success: true });
-
   } catch (err) {
-    console.error("YT ERROR:", err);
+    console.error('YT ERROR:', err);
+    isPlaying = false;
     res.status(500).json({ error: err.message });
   }
 });
