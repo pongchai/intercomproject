@@ -583,59 +583,55 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
       const ffmpegStream = ffmpegProc.pipe();
 
-      const CHUNK_SIZE = 1024;
+      const CHUNK_SIZE = 2048;
 
-      ffmpegStream.on('data', async (chunk) => {
+      ffmpegStream.on('data', (chunk) => {
 
-        // ไม่มี ESP32 เชื่อมอยู่
-        if (esp32Clients.length === 0) {
+          if (!chunk || chunk.length === 0) {
+              return;
+          }
 
-          try {
+          // 🔥 ไม่มี ESP32 → หยุด
+          if (esp32Clients.length === 0) {
 
-            currentFFmpeg.kill('SIGKILL');
+              try {
+                  currentFFmpeg.kill('SIGKILL');
+              } catch (e) {}
 
-          } catch (e) {}
+              currentFFmpeg = null;
+              isPlaying = false;
 
-          currentFFmpeg = null;
+              return;
+          }
 
-          isPlaying = false;
+          // 🔥 ตัด chunk ให้พอดี realtime
+          for (let i = 0; i < chunk.length; i += CHUNK_SIZE) {
 
-          return;
+              const piece = chunk.slice(i, i + CHUNK_SIZE);
 
-        }
+              esp32Clients.forEach(client => {
 
-        // ตัด chunk ใหญ่ให้เล็กลง
-        for (let i = 0; i < chunk.length; i += CHUNK_SIZE) {
+                  if (!devices || devices.includes(client.deviceId)) {
 
-          const piece = chunk.slice(i, i + CHUNK_SIZE);
+                      if (!client.res.writableEnded) {
 
-          esp32Clients.forEach(client => {
+                          try {
 
-            // ส่งเฉพาะ device ที่เลือก
-            if (!devices || devices.includes(client.deviceId)) {
+                              client.res.write(piece);
 
-              if (!client.res.writableEnded) {
+                          } catch (e) {
 
-                try {
+                              console.error('write fail:', client.deviceId);
 
-                  client.res.write(piece);
+                          }
 
-                } catch (e) {
+                      }
 
-                  console.error('write fail:', client.deviceId);
+                  }
 
-                }
+              });
 
-              }
-
-            }
-
-          });
-
-          // หน่วงนิดนึงให้ ESP32 อ่านทัน
-          await new Promise(r => setTimeout(r, 25));
-
-        }
+          }
 
       });
 
