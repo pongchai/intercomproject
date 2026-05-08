@@ -38,6 +38,7 @@ app.use(express.json()); // <-- Add this line
 const PORT = process.env.PORT || 8080;
 
 const esp32Clients = [];
+const ytClients = [];
 const audioQueue = [];
 const MAX_QUEUE = 50;
 
@@ -106,6 +107,51 @@ app.get('/stream', async (req, res) => {
   }
 });
 
+app.get('/ytstream', async (req, res) => {
+
+  try {
+
+    req.setTimeout(0);
+
+    const deviceId = req?.query?.deviceId;
+
+    if (!deviceId) {
+      return res.status(400).end();
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Connection': 'keep-alive'
+    });
+
+    const index = ytClients.findIndex(c => c.deviceId === deviceId);
+
+    if (index !== -1) {
+
+      ytClients[index].res = res;
+
+    } else {
+
+      ytClients.push({ deviceId, res });
+
+    }
+
+    req.on('close', () => {
+
+      const index = ytClients.findIndex(c => c.res === res);
+
+      if (index !== -1) ytClients.splice(index, 1);
+
+    });
+
+  } catch (err) {
+
+    console.error("YT STREAM ERROR:", err);
+
+  }
+
+});
+
 app.get('/receiveList', (req, res) => {
   res.status(200).json({ receiveList: receiveList});
 });
@@ -150,6 +196,7 @@ const wss = new WebSocket.Server({ server, path: '/broadcast' });
 wss.on('connection', ws => {
   console.log('[Browser] WebSocket connected');
   ws.on('message', msg => {
+    if (isPlaying) return;
     const buffer = Buffer.from(msg);
 
     const queueLen = audioQueue.length;
@@ -534,10 +581,6 @@ app.post('/playYoutubeToDevice', async (req, res) => {
       try { currentFFmpeg.kill('SIGKILL'); } catch (e) {}
       currentFFmpeg = null;
     }
-    if (currentStream) {
-      try { currentStream.kill('SIGKILL'); } catch (e) {}
-      currentStream = null;
-    }
 
     isPlaying = true;
 
@@ -583,16 +626,16 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
       const ffmpegStream = ffmpegProc.pipe();
 
-      const CHUNK_SIZE = 2048;
+      const CHUNK_SIZE = 1024;
 
-      ffmpegStream.on('data', (chunk) => {
+      ffmpegStream.on('data', async (chunk) => {
 
           if (!chunk || chunk.length === 0) {
               return;
           }
 
           // 🔥 ไม่มี ESP32 → หยุด
-          if (esp32Clients.length === 0) {
+          if (ytClients.length === 0) {
 
               try {
                   currentFFmpeg.kill('SIGKILL');
@@ -609,7 +652,7 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
               const piece = chunk.slice(i, i + CHUNK_SIZE);
 
-              esp32Clients.forEach(client => {
+              ytClients.forEach(client => {
 
                   if (!devices || devices.includes(client.deviceId)) {
 
@@ -630,7 +673,8 @@ app.post('/playYoutubeToDevice', async (req, res) => {
                   }
 
               });
-
+              
+              await new Promise(r => setTimeout(r, 30)); 
           }
 
       });
@@ -669,16 +713,43 @@ server.listen(PORT, () => {
 });
 
 setInterval(() => {
+
   for (let i = esp32Clients.length - 1; i >= 0; i--) {
+
     if (
       !esp32Clients[i].res ||
       esp32Clients[i].res.writableEnded ||
       esp32Clients[i].res.destroyed
     ) {
+
       console.log("🧹 remove dead client:", esp32Clients[i].deviceId);
+
       esp32Clients.splice(i, 1);
+
     }
+
   }
+
+}, 10000);
+
+setInterval(() => {
+
+  for (let i = ytClients.length - 1; i >= 0; i--) {
+
+    if (
+      !ytClients[i].res ||
+      ytClients[i].res.writableEnded ||
+      ytClients[i].res.destroyed
+    ) {
+
+      console.log("🧹 remove dead yt client:", ytClients[i].deviceId);
+
+      ytClients.splice(i, 1);
+
+    }
+
+  }
+
 }, 10000);
 
 // ลบ device ที่ไม่ได้เชื่อมต่อแล้ว
