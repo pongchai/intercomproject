@@ -168,9 +168,7 @@ wss.on('connection', ws => {
     }
 
     if (audioQueue.length < MAX_QUEUE) {
-
       audioQueue.push(buffer);
-
     } else {
 
       console.log("🔥 drop audio (queue full)");
