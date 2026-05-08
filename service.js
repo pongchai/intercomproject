@@ -674,7 +674,7 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
               });
               
-              await new Promise(r => setTimeout(r, 30)); 
+              await new Promise(r => setTimeout(r, 20)); 
           }
 
       });
