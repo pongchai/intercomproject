@@ -167,12 +167,14 @@ wss.on('connection', ws => {
       audioQueue.shift();
     }
 
-    audioQueue.push(buffer);
-
     if (audioQueue.length < MAX_QUEUE) {
+
       audioQueue.push(buffer);
+
     } else {
+
       console.log("🔥 drop audio (queue full)");
+      
     }
   });
   ws.on('close', () => console.log('[Browser] Disconnected'));
@@ -583,25 +585,60 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
       const ffmpegStream = ffmpegProc.pipe();
 
-      ffmpegStream.on('data', (chunk) => {
+      const CHUNK_SIZE = 1024;
+
+      ffmpegStream.on('data', async (chunk) => {
+
+        // ไม่มี ESP32 เชื่อมอยู่
         if (esp32Clients.length === 0) {
-          try { currentFFmpeg.kill('SIGKILL'); } catch (e) {}
+
+          try {
+
+            currentFFmpeg.kill('SIGKILL');
+
+          } catch (e) {}
+
           currentFFmpeg = null;
+
           isPlaying = false;
+
           return;
+
         }
 
-        esp32Clients.forEach(client => {
-          if (!devices || devices.includes(client.deviceId)) {
-            if (!client.res.writableEnded) {
-              try {
-                client.res.write(chunk);
-              } catch (e) {
-                console.error('write fail:', client.deviceId);
+        // ตัด chunk ใหญ่ให้เล็กลง
+        for (let i = 0; i < chunk.length; i += CHUNK_SIZE) {
+
+          const piece = chunk.slice(i, i + CHUNK_SIZE);
+
+          esp32Clients.forEach(client => {
+
+            // ส่งเฉพาะ device ที่เลือก
+            if (!devices || devices.includes(client.deviceId)) {
+
+              if (!client.res.writableEnded) {
+
+                try {
+
+                  client.res.write(piece);
+
+                } catch (e) {
+
+                  console.error('write fail:', client.deviceId);
+
+                }
+
               }
+
             }
-          }
-        });
+
+          });
+
+          // หน่วงนิดนึงให้ ESP32 อ่านทัน
+          await new Promise(r => setTimeout(r, 25));
+
+        }
+
       });
 
       ffmpegStream.on('end', () => {
@@ -625,6 +662,12 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
 app.get('/syncTime', (req, res) => {
   res.json({ startTime: Date.now() });
+});
+
+app.get('/ping', (req,res)=>{
+
+  res.json({ ok:true });
+
 });
 
 server.listen(PORT, () => {
