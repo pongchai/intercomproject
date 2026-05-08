@@ -296,7 +296,7 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
     });
     // หน่วงเวลาเล็กน้อยเพื่อให้สัมพันธ์กับ Sample Rate (16kHz)
     // 1024 bytes / (16000 samples/sec * 2 bytes/sample) ≈ 32ms
-    await new Promise(r => setTimeout(r, 30));
+    await new Promise(r => setTimeout(r, 60));
   }
   
   console.log(`[Scheduler] Finished stream: ${pcmFile}`);
