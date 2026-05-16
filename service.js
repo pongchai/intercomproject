@@ -5,8 +5,6 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
-const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
-const ffmpeg = require('fluent-ffmpeg');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -149,36 +147,27 @@ const server = http.createServer(app);
 // WebSocket Server สำหรับ Browser ส่งเสียง
 const wss = new WebSocket.Server({ server, path: '/broadcast' });
 
+
 wss.on('connection', ws => {
+
   console.log('[Browser] WebSocket connected');
+
   ws.on('message', msg => {
-    if (isPlaying) return;
+
     const buffer = Buffer.from(msg);
 
     const queueLen = audioQueue.length;
 
     if (queueLen > MAX_QUEUE) {
-      console.log("🔥 overflow → trim queue");
       audioQueue.splice(0, Math.floor(queueLen / 2));
-    } else if (queueLen > 20) {
-      console.log("⚠️ mild lag → drop half");
-      audioQueue.splice(0, Math.floor(queueLen / 2));
-    }
-
-    if (audioQueue.length >= MAX_QUEUE) {
-      console.log("🔥 queue full → drop oldest");
-      audioQueue.shift();
     }
 
     if (audioQueue.length < MAX_QUEUE) {
       audioQueue.push(buffer);
-    } else {
-
-      console.log("🔥 drop audio (queue full)");
-      
     }
+
   });
-  ws.on('close', () => console.log('[Browser] Disconnected'));
+
 });
 
 // ปรับ Interval จาก 1ms เป็น 40-50ms เพื่อให้เหมาะสมกับ Buffer ของ ESP32
@@ -189,25 +178,6 @@ setInterval(() => {
   if (esp32Clients.length === 0) {
     console.log("🛑 no clients → stop stream");
 
-    try {
-      if (currentStream && typeof currentStream.destroy === 'function') {
-        try {
-          currentStream.destroy();
-        } catch (e) {
-          console.error("destroy error:", e);
-        }
-      }
-    } catch (e) {}
-
-    if (currentFFmpeg) {
-      try {
-        currentFFmpeg.kill('SIGKILL');
-      } catch (e) {}
-    }
-
-    currentStream = null;
-    currentFFmpeg = null;
-    isPlaying = false;
   }
 
   // 🔥 debug log (สุ่ม)
