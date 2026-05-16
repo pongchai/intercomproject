@@ -5,6 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
+const ffmpeg = require('fluent-ffmpeg');
+const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -491,10 +493,6 @@ app.get('/time', (req, res) => {
 });
 
 //const ytdl = require('@distube/ytdl-core');
-
-let currentStream = null;
-let currentFFmpeg = null;
-let isPlaying = false;
 
 app.get('/syncTime', (req, res) => {
   res.json({ startTime: Date.now() });
