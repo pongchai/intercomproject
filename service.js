@@ -582,150 +582,161 @@ app.get('/time', (req, res) => {
 });
 
 //const ytdl = require('@distube/ytdl-core');
-const { spawn } = require('child_process');
 
 let currentStream = null;
 let currentFFmpeg = null;
 let isPlaying = false;
 
 app.post('/playYoutubeToDevice', async (req, res) => {
+
   const { url, devices } = req.body;
-  if (!url) return res.status(400).json({ error: "No URL" });
+
+  if (!url) {
+
+    return res.status(400).json({
+      error: "No URL"
+    });
+
+  }
 
   try {
+
+    console.log("🎵 START YOUTUBE:", url);
+
     // 🔥 kill ของเก่า
     if (currentFFmpeg) {
-      try { currentFFmpeg.kill('SIGKILL'); } catch (e) {}
+
+      try {
+
+        currentFFmpeg.kill('SIGKILL');
+
+      } catch (e) {}
+
       currentFFmpeg = null;
     }
 
     isPlaying = true;
 
-    let audioUrl = '';
+    // 🔥 ใช้ ffmpeg เปิด YouTube ตรง
+    const ffmpegProc = ffmpeg(url)
 
-    // 🔥 ดึง audio URL จาก yt-dlp
-    const ytDlp = spawn('yt-dlp', [
-      '-f', 'bestaudio',
-      '-g',
-      '--no-playlist',
-      '--extractor-args',
-      'youtube:player_client=android',
-      '--user-agent',
-      'Mozilla/5.0 (Linux; Android 11)',
-      url
-    ]);
-        
-    ytDlp.stdout.setEncoding('utf8');
+      .inputOptions([
+        '-reconnect 1',
+        '-reconnect_streamed 1',
+        '-reconnect_delay_max 5',
+        '-user_agent Mozilla/5.0'
+      ])
 
-    ytDlp.stdout.on('data', (data) => {
-      audioUrl = data.toString().trim().split('\n')[0];
-      console.log("Audio URL:", audioUrl);
-    });
+      .format('s16le')
 
-    ytDlp.stderr.on('data', (data) => {
-      console.error('yt-dlp error:', data.toString());
-    });
+      .audioCodec('pcm_s16le')
 
-    ytDlp.on('close', (code) => {
-      if (code !== 0 || !audioUrl) {
-        console.error('yt-dlp failed');
+      .audioChannels(1)
+
+      .audioFrequency(16000)
+
+      .on('start', (cmd) => {
+
+        console.log("FFMPEG START:", cmd);
+
+      })
+
+      .on('error', (err) => {
+
+        console.error('FFmpeg error:', err);
+
         isPlaying = false;
-        return res.status(500).json({ error: 'yt-dlp failed' });
+
+        currentFFmpeg = null;
+
+      })
+
+      .on('end', () => {
+
+        console.log("YT END");
+
+        isPlaying = false;
+
+        currentFFmpeg = null;
+
+      });
+
+    currentFFmpeg = ffmpegProc;
+
+    const ffmpegStream = ffmpegProc.pipe();
+
+    const CHUNK_SIZE = 1024;
+
+    ffmpegStream.on('data', async (chunk) => {
+
+      if (!chunk || chunk.length === 0) {
+        return;
       }
 
-      console.log('Audio URL:', audioUrl);
+      // 🔥 ไม่มี client
+      if (ytClients.length === 0) {
 
-      // 🔥 ส่งผ่าน ffmpeg แปลงเป็น PCM
-      const ffmpegProc = ffmpeg(audioUrl)
-        .inputOptions([
-          '-reconnect 1',
-          '-reconnect_streamed 1',
-          '-reconnect_delay_max 5'
-        ])
-        .format('s16le')
-        .audioCodec('pcm_s16le')
-        .audioChannels(1)
-        .audioFrequency(16000)
-        .on('error', (err) => {
-          console.error('FFmpeg error:', err);
-          isPlaying = false;
-          currentFFmpeg = null;
-        });
+        try {
 
-      currentFFmpeg = ffmpegProc;
+          currentFFmpeg.kill('SIGKILL');
 
-      const ffmpegStream = ffmpegProc.pipe();
+        } catch (e) {}
 
-      const CHUNK_SIZE = 1024;
+        currentFFmpeg = null;
 
-      ffmpegStream.on('data', async (chunk) => {
+        isPlaying = false;
 
-          if (!chunk || chunk.length === 0) {
-              return;
-          }
+        return;
+      }
 
-          // 🔥 ไม่มี ESP32 → หยุด
-          if (ytClients.length === 0) {
+      // 🔥 realtime stream
+      for (let i = 0; i < chunk.length; i += CHUNK_SIZE) {
+
+        const piece = chunk.slice(i, i + CHUNK_SIZE);
+
+        ytClients.forEach(client => {
+
+          if (!devices || devices.includes(client.deviceId)) {
+
+            if (!client.res.writableEnded) {
 
               try {
-                  currentFFmpeg.kill('SIGKILL');
-              } catch (e) {}
 
-              currentFFmpeg = null;
-              isPlaying = false;
+                client.res.write(piece);
 
-              return;
+              } catch (e) {
+
+                console.error("write fail");
+
+              }
+
+            }
+
           }
 
-          // 🔥 ตัด chunk ให้พอดี realtime
-          for (let i = 0; i < chunk.length; i += CHUNK_SIZE) {
+        });
 
-              const piece = chunk.slice(i, i + CHUNK_SIZE);
+        // 🔥 timing สำคัญมาก
+        await new Promise(r => setTimeout(r, 32));
 
-              ytClients.forEach(client => {
-
-                  if (!devices || devices.includes(client.deviceId)) {
-
-                      if (!client.res.writableEnded) {
-
-                          try {
-
-                              client.res.write(piece);
-
-                          } catch (e) {
-
-                              console.error('write fail:', client.deviceId);
-
-                          }
-
-                      }
-
-                  }
-
-              });
-              
-              await new Promise(r => setTimeout(r, 32)); 
-          }
-
-      });
-
-      ffmpegStream.on('end', () => {
-        console.log('YouTube stream ended');
-        currentFFmpeg = null;
-        isPlaying = false;
-      });
-
-      // ตอบ client ก่อนเลย ไม่ต้องรอ stream จบ
-      if (!res.headersSent) {
-        res.json({ success: true });
       }
+
     });
 
+    res.json({ success: true });
+
   } catch (err) {
+
     console.error('YT ERROR:', err);
+
     isPlaying = false;
-    res.status(500).json({ error: err.message });
+
+    res.status(500).json({
+      error: err.message
+    });
+
   }
+
 });
 
 app.get('/syncTime', (req, res) => {
