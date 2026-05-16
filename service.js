@@ -7,7 +7,6 @@ const cors = require('cors');
 const multer = require('multer');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffmpeg = require('fluent-ffmpeg');
-const { spawn } = require('child_process');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -39,7 +38,6 @@ app.use(express.json()); // <-- Add this line
 const PORT = process.env.PORT || 8080;
 
 const esp32Clients = [];
-const ytClients = [];
 const audioQueue = [];
 const MAX_QUEUE = 50;
 
@@ -108,66 +106,6 @@ app.get('/stream', async (req, res) => {
   } catch (err) {
     console.error("🔥 STREAM ERROR:", err);
   }
-});
-
-app.get('/ytstream', async (req, res) => {
-
-  try {
-
-    req.setTimeout(0);
-
-    const deviceId = req?.query?.deviceId;
-
-    if (!deviceId) {
-      return res.status(400).end();
-    }
-
-    res.writeHead(200, {
-      'Content-Type': 'application/octet-stream',
-      'Connection': 'keep-alive',
-      'Cache-Control': 'no-cache',
-      'Transfer-Encoding': 'chunked'
-    });
-
-    // 🔥 ป้องกัน Railway ตัด connection
-    const keepAlive = setInterval(() => {
-
-      if (!res.writableEnded) {
-
-        res.write(Buffer.alloc(2));
-
-      }
-
-    }, 2000);
-
-    const index = ytClients.findIndex(c => c.deviceId === deviceId);
-
-    if (index !== -1) {
-
-      ytClients[index].res = res;
-
-    } else {
-
-      ytClients.push({ deviceId, res });
-
-    }
-
-    req.on('close', () => {
-
-      clearInterval(keepAlive);
-
-      const index = ytClients.findIndex(c => c.res === res);
-
-      if (index !== -1) ytClients.splice(index, 1);
-
-    });
-
-  } catch (err) {
-
-    console.error("YT STREAM ERROR:", err);
-
-  }
-
 });
 
 app.get('/receiveList', (req, res) => {
@@ -588,160 +526,6 @@ let currentStream = null;
 let currentFFmpeg = null;
 let isPlaying = false;
 
-app.post('/playYoutubeToDevice', async (req, res) => {
-
-  const { url, devices } = req.body;
-
-  try {
-
-    console.log("🎵 START YOUTUBE:", url);
-
-    // 🔥 kill เก่า
-    if (currentFFmpeg) {
-
-      try {
-
-        currentFFmpeg.kill('SIGKILL');
-
-      } catch (e) {}
-
-      currentFFmpeg = null;
-    }
-
-    isPlaying = true;
-
-    // 🔥 yt-dlp stream
-    const ytDlp = spawn('yt-dlp', [
-
-      '--no-playlist',
-
-      '-f', 'bestaudio',
-
-      '--extract-audio',
-
-      '--audio-format', 'mp3',
-
-      '-o', '-',
-
-      url
-
-    ]);
-
-    ytDlp.stderr.on('data', (d) => {
-
-      console.log("yt-dlp:", d.toString());
-
-    });
-
-    // 🔥 ffmpeg รับ stdin จาก yt-dlp
-    const ffmpegProc = ffmpeg()
-
-      .input(ytDlp.stdout)
-
-      .inputFormat('mp3')
-
-      .inputOptions([
-        '-reconnect 1',
-        '-reconnect_streamed 1',
-        '-reconnect_delay_max 5'
-      ])
-
-      .format('s16le')
-
-      .audioCodec('pcm_s16le')
-
-      .audioChannels(1)
-
-      .audioFrequency(16000)
-
-      .on('start', (cmd) => {
-
-        console.log("FFMPEG START:", cmd);
-
-      })
-
-      .on('error', (err) => {
-
-        console.error("FFMPEG ERROR:", err);
-
-        isPlaying = false;
-
-        currentFFmpeg = null;
-
-      })
-
-      .on('end', () => {
-
-        console.log("YT END");
-
-        isPlaying = false;
-
-        currentFFmpeg = null;
-
-      });
-
-    currentFFmpeg = ffmpegProc;
-
-    const ffmpegStream = ffmpegProc.pipe();
-
-    const CHUNK_SIZE = 1024;
-
-    ffmpegStream.on('data', async (chunk) => {
-
-      if (!chunk || chunk.length === 0) return;
-
-      for (let i = 0; i < chunk.length; i += CHUNK_SIZE) {
-
-        const piece = chunk.slice(i, i + CHUNK_SIZE);
-
-        ytClients.forEach(client => {
-
-          if (!devices || devices.includes(client.deviceId)) {
-
-            if (!client.res.writableEnded) {
-
-              try {
-
-                client.res.write(piece);
-
-              } catch (e) {
-
-                console.error("write fail");
-
-              }
-
-            }
-
-          }
-
-        });
-
-        await new Promise(r => setTimeout(r, 32));
-
-      }
-
-    });
-
-    ytDlp.on('close', (code) => {
-
-      console.log("yt-dlp closed:", code);
-
-    });
-
-    res.json({ success: true });
-
-  } catch (err) {
-
-    console.error("YT ERROR:", err);
-
-    res.status(500).json({
-      error: err.message
-    });
-
-  }
-
-});
-
 app.get('/syncTime', (req, res) => {
   res.json({ startTime: Date.now() });
 });
@@ -769,26 +553,6 @@ setInterval(() => {
       console.log("🧹 remove dead client:", esp32Clients[i].deviceId);
 
       esp32Clients.splice(i, 1);
-
-    }
-
-  }
-
-}, 10000);
-
-setInterval(() => {
-
-  for (let i = ytClients.length - 1; i >= 0; i--) {
-
-    if (
-      !ytClients[i].res ||
-      ytClients[i].res.writableEnded ||
-      ytClients[i].res.destroyed
-    ) {
-
-      console.log("🧹 remove dead yt client:", ytClients[i].deviceId);
-
-      ytClients.splice(i, 1);
 
     }
 
