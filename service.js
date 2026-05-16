@@ -601,14 +601,21 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
     isPlaying = true;
 
+    let audioUrl = '';
+
     // 🔥 ดึง audio URL จาก yt-dlp
     const ytDlp = spawn('yt-dlp', [
-      '-f', 'bestaudio',
-      '--get-url',
+      '-f', 'bestaudio[ext=m4a]/bestaudio',
+      '-g',
+      '--extractor-args',
+      'youtube:player_client=android',
+      '--no-playlist',
+      '--user-agent',
+      'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip',
       url
-    ]);
-
-    let audioUrl = '';
+    ]);   
+    
+    ytDlp.stdout.setEncoding('utf8');
 
     ytDlp.stdout.on('data', (data) => {
       audioUrl += data.toString().trim();
@@ -629,6 +636,11 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
       // 🔥 ส่งผ่าน ffmpeg แปลงเป็น PCM
       const ffmpegProc = ffmpeg(audioUrl)
+        .inputOptions([
+          '-reconnect 1',
+          '-reconnect_streamed 1',
+          '-reconnect_delay_max 5'
+        ])
         .format('s16le')
         .audioCodec('pcm_s16le')
         .audioChannels(1)
