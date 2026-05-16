@@ -63,7 +63,9 @@ app.get('/stream', async (req, res) => {
     streamStartTime = Date.now();
     res.writeHead(200, {
       'Content-Type': 'application/octet-stream',
-      'Connection': 'keep-alive'
+      'Connection': 'keep-alive',
+      'Cache-Control': 'no-cache',
+      'Transfer-Encoding': 'chunked'
     });
 
     const keepAlive = setInterval(() => {
@@ -121,8 +123,21 @@ app.get('/ytstream', async (req, res) => {
 
     res.writeHead(200, {
       'Content-Type': 'application/octet-stream',
-      'Connection': 'keep-alive'
+      'Connection': 'keep-alive',
+      'Cache-Control': 'no-cache',
+      'Transfer-Encoding': 'chunked'
     });
+
+    // 🔥 ป้องกัน Railway ตัด connection
+    const keepAlive = setInterval(() => {
+
+      if (!res.writableEnded) {
+
+        res.write(Buffer.alloc(2));
+
+      }
+
+    }, 2000);
 
     const index = ytClients.findIndex(c => c.deviceId === deviceId);
 
@@ -137,6 +152,8 @@ app.get('/ytstream', async (req, res) => {
     }
 
     req.on('close', () => {
+
+      clearInterval(keepAlive);
 
       const index = ytClients.findIndex(c => c.res === res);
 
@@ -674,7 +691,7 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
               });
               
-              await new Promise(r => setTimeout(r, 20)); 
+              await new Promise(r => setTimeout(r, 32)); 
           }
 
       });
