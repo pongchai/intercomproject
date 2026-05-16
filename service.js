@@ -605,20 +605,21 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
     // 🔥 ดึง audio URL จาก yt-dlp
     const ytDlp = spawn('yt-dlp', [
-      '-f', 'bestaudio[ext=m4a]/bestaudio',
+      '-f', 'bestaudio',
       '-g',
+      '--no-playlist',
       '--extractor-args',
       'youtube:player_client=android',
-      '--no-playlist',
       '--user-agent',
-      'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip',
+      'Mozilla/5.0 (Linux; Android 11)',
       url
-    ]);   
-    
+    ]);
+        
     ytDlp.stdout.setEncoding('utf8');
 
     ytDlp.stdout.on('data', (data) => {
-      audioUrl += data.toString().trim();
+      audioUrl = data.toString().trim().split('\n')[0];
+      console.log("Audio URL:", audioUrl);
     });
 
     ytDlp.stderr.on('data', (data) => {
