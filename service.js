@@ -7,6 +7,7 @@ const cors = require('cors');
 const multer = require('multer');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffmpeg = require('fluent-ffmpeg');
+const { spawn } = require('child_process');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -591,19 +592,11 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
   const { url, devices } = req.body;
 
-  if (!url) {
-
-    return res.status(400).json({
-      error: "No URL"
-    });
-
-  }
-
   try {
 
     console.log("🎵 START YOUTUBE:", url);
 
-    // 🔥 kill ของเก่า
+    // 🔥 kill เก่า
     if (currentFFmpeg) {
 
       try {
@@ -617,14 +610,35 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
     isPlaying = true;
 
-    // 🔥 ใช้ ffmpeg เปิด YouTube ตรง
-    const ffmpegProc = ffmpeg(url)
+    // 🔥 yt-dlp stream
+    const ytDlp = spawn('yt-dlp', [
+
+      '-f', 'bestaudio',
+
+      '-o', '-',
+
+      '--no-playlist',
+
+      '--extractor-args',
+      'youtube:player_client=android',
+
+      url
+
+    ]);
+
+    ytDlp.stderr.on('data', (d) => {
+
+      console.log("yt-dlp:", d.toString());
+
+    });
+
+    // 🔥 ffmpeg รับ stdin จาก yt-dlp
+    const ffmpegProc = ffmpeg(ytDlp.stdout)
 
       .inputOptions([
         '-reconnect 1',
         '-reconnect_streamed 1',
-        '-reconnect_delay_max 5',
-        '-user_agent Mozilla/5.0'
+        '-reconnect_delay_max 5'
       ])
 
       .format('s16le')
@@ -643,7 +657,7 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
       .on('error', (err) => {
 
-        console.error('FFmpeg error:', err);
+        console.error("FFMPEG ERROR:", err);
 
         isPlaying = false;
 
@@ -669,27 +683,8 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
     ffmpegStream.on('data', async (chunk) => {
 
-      if (!chunk || chunk.length === 0) {
-        return;
-      }
+      if (!chunk || chunk.length === 0) return;
 
-      // 🔥 ไม่มี client
-      if (ytClients.length === 0) {
-
-        try {
-
-          currentFFmpeg.kill('SIGKILL');
-
-        } catch (e) {}
-
-        currentFFmpeg = null;
-
-        isPlaying = false;
-
-        return;
-      }
-
-      // 🔥 realtime stream
       for (let i = 0; i < chunk.length; i += CHUNK_SIZE) {
 
         const piece = chunk.slice(i, i + CHUNK_SIZE);
@@ -716,10 +711,15 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
         });
 
-        // 🔥 timing สำคัญมาก
         await new Promise(r => setTimeout(r, 32));
 
       }
+
+    });
+
+    ytDlp.on('close', (code) => {
+
+      console.log("yt-dlp closed:", code);
 
     });
 
@@ -727,9 +727,7 @@ app.post('/playYoutubeToDevice', async (req, res) => {
 
   } catch (err) {
 
-    console.error('YT ERROR:', err);
-
-    isPlaying = false;
+    console.error("YT ERROR:", err);
 
     res.status(500).json({
       error: err.message
