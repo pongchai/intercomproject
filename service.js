@@ -613,14 +613,15 @@ app.post('/playYoutubeToDevice', async (req, res) => {
     // 🔥 yt-dlp stream
     const ytDlp = spawn('yt-dlp', [
 
-      '-f', 'bestaudio',
-
-      '-o', '-',
-
       '--no-playlist',
 
-      '--extractor-args',
-      'youtube:player_client=android',
+      '-f', 'bestaudio',
+
+      '--extract-audio',
+
+      '--audio-format', 'mp3',
+
+      '-o', '-',
 
       url
 
@@ -633,7 +634,11 @@ app.post('/playYoutubeToDevice', async (req, res) => {
     });
 
     // 🔥 ffmpeg รับ stdin จาก yt-dlp
-    const ffmpegProc = ffmpeg(ytDlp.stdout)
+    const ffmpegProc = ffmpeg()
+
+      .input(ytDlp.stdout)
+
+      .inputFormat('mp3')
 
       .inputOptions([
         '-reconnect 1',
