@@ -6,6 +6,7 @@ const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
+const youtubedl = require("yt-dlp-exec");
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -496,6 +497,41 @@ app.get('/time', (req, res) => {
 
 app.get('/syncTime', (req, res) => {
   res.json({ startTime: Date.now() });
+});
+
+app.get("/ytdl", async (req, res) => {
+
+  try {
+
+    const url = req.query.url;
+
+    if (!url) {
+      return res.status(400).json({
+        error: "No URL"
+      });
+    }
+
+    const info = await youtubedl(
+      url,
+      {
+        dumpSingleJson: true,
+        noWarnings: true,
+        preferFreeFormats: true
+      }
+    );
+
+    res.json({
+      audioUrl: info.url
+    });
+
+  } catch(err) {
+
+    console.log("YT ERROR", err);
+
+    res.status(500).json({
+      error: err.message
+    });
+  }
 });
 
 app.get('/ping', (req,res)=>{
