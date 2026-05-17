@@ -34,6 +34,7 @@ app.use((req, res, next) => {
 });
 
 app.use(cors());
+app.options("*", cors());
 app.use(express.json()); // <-- Add this line
 
 const PORT = process.env.PORT || 8080;
