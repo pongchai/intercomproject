@@ -430,6 +430,43 @@ app.get('/audioList', (req, res) => {
   });
 });
 
+app.post('/deleteAudio', (req, res) => {
+
+  const { fileName } = req.body;
+
+  if (!fileName) {
+    return res.status(400).json({
+      error: "No fileName"
+    });
+  }
+
+  const filePath = path.join(pcmFolder, fileName);
+
+  if (!fs.existsSync(filePath)) {
+
+    return res.status(404).json({
+      error: "File not found"
+    });
+  }
+
+  fs.unlink(filePath, err => {
+
+    if (err) {
+
+      console.error(err);
+
+      return res.status(500).json({
+        error: err.message
+      });
+    }
+
+    console.log("[DELETE AUDIO]", fileName);
+
+    res.json({
+      success: true
+    });
+  });
+});
 
 //stream text max7219
 app.get('/getText', (req, res) => {
