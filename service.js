@@ -6,7 +6,7 @@ const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
-const youtubedl = require("yt-dlp-exec");
+const ytdl = require("@distube/ytdl-core");
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -511,22 +511,25 @@ app.get("/ytdl", async (req, res) => {
       });
     }
 
-    const info = await youtubedl(
-      url,
-      {
-        dumpSingleJson: true,
-        noWarnings: true,
-        preferFreeFormats: true
-      }
-    );
+    const info =
+      await ytdl.getInfo(url);
+
+    const format =
+      ytdl.chooseFormat(
+        info.formats,
+        {
+          quality: "highestaudio",
+          filter: "audioonly"
+        }
+      );
 
     res.json({
-      audioUrl: info.url
+      audioUrl: format.url
     });
 
   } catch(err) {
 
-    console.log("YT ERROR", err);
+    console.log(err);
 
     res.status(500).json({
       error: err.message
