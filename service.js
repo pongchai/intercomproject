@@ -194,7 +194,7 @@ setInterval(() => {
     esp32Clients.length > 0 &&
     Array.isArray(receiveSelected)
   ) {
-    const chunksToSend = audioQueue.splice(0, 2);
+    const chunksToSend = audioQueue.splice(0, 6);
     const finalBuffer = Buffer.concat(chunksToSend);
 
     esp32Clients.forEach(client => {
