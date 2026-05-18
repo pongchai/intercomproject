@@ -158,6 +158,11 @@ wss.on('connection', ws => {
 
   ws.on('message', msg => {
 
+    console.log(
+      "AUDIO IN:",
+      msg.length
+    );
+
     const buffer = Buffer.from(msg);
 
     const queueLen = audioQueue.length;
@@ -180,8 +185,10 @@ setInterval(() => {
 
   // 🔥 STEP 1: ไม่มี client → หยุด stream ทันที
   if (esp32Clients.length === 0) {
-    console.log("🛑 no clients → stop stream");
 
+    console.log("🛑 no clients");
+
+    return;
   }
 
   // 🔥 debug log (สุ่ม)
