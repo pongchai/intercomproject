@@ -531,7 +531,6 @@ app.get('/time', (req, res) => {
   });
 });
 
-//const ytdl = require('@distube/ytdl-core');
 
 app.get('/syncTime', (req, res) => {
   res.json({ startTime: Date.now() });
