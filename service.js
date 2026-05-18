@@ -6,7 +6,7 @@ const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
-const ytdl = require("@distube/ytdl-core");
+const { Innertube } = require("youtubei.js");
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -549,20 +549,29 @@ app.get("/ytdl", async (req, res) => {
       });
     }
 
-    const info =
-      await ytdl.getInfo(url);
+    const youtube =
+      await Innertube.create();
 
-    const format =
-      ytdl.chooseFormat(
-        info.formats,
-        {
-          quality: "highestaudio",
-          filter: "audioonly"
-        }
+    const info =
+      await youtube.getInfo(url);
+
+    const formats =
+      info.streaming_data?.adaptive_formats || [];
+
+    const audio =
+      formats.find(f =>
+        f.mime_type?.includes("audio")
       );
 
+    if (!audio) {
+
+      return res.status(500).json({
+        error: "No audio format"
+      });
+    }
+
     res.json({
-      audioUrl: format.url
+      audioUrl: audio.url
     });
 
   } catch(err) {
