@@ -14,7 +14,6 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 
 const schedule = require("node-schedule");
 
-const { PassThrough } = require("stream");
 let scheduleList = []; // { id, url, schedAt, mode, job }
 
 let esp32Messages = {}; // เก็บข้อความล่าสุดของแต่ละ device
@@ -536,66 +535,6 @@ app.get('/time', (req, res) => {
 
 app.get('/syncTime', (req, res) => {
   res.json({ startTime: Date.now() });
-});
-
-app.get("/ytdl", async (req, res) => {
-
-  try {
-
-    const ytUrl = req.query.url;
-
-    if (!ytUrl) {
-      return res.status(400).json({
-        error: "No URL"
-      });
-    }
-
-    const youtube = await Innertube.create();
-
-    const info = await youtube.getInfo(ytUrl);
-
-    const formats =
-      info.streaming_data?.adaptive_formats || [];
-
-    const audioFormat = formats.find(f =>
-      f.mime_type?.includes("audio")
-    );
-
-    if (!audioFormat?.url) {
-
-      return res.status(500).json({
-        error: "This video is unavailable"
-      });
-    }
-
-    const response = await fetch(audioFormat.url);
-
-    if (!response.ok) {
-
-      return res.status(500).json({
-        error: "Audio fetch failed"
-      });
-    }
-
-    res.setHeader(
-      "Content-Type",
-      "audio/mp4"
-    );
-
-    const stream = PassThrough.fromWeb(
-      response.body
-    );
-
-    stream.pipe(res);
-
-  } catch (err) {
-
-    console.error("YT ERROR:", err);
-
-    res.status(500).json({
-      error: err.message
-    });
-  }
 });
 
 app.get('/ping', (req,res)=>{
