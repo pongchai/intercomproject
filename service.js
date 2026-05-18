@@ -7,6 +7,7 @@ const cors = require('cors');
 const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
 const { Innertube } = require("youtubei.js");
+const { PassThrough } = require("stream");
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -541,42 +542,55 @@ app.get("/ytdl", async (req, res) => {
 
   try {
 
-    const url = req.query.url;
+    const ytUrl = req.query.url;
 
-    if (!url) {
+    if (!ytUrl) {
       return res.status(400).json({
         error: "No URL"
       });
     }
 
-    const youtube =
-      await Innertube.create();
+    const youtube = await Innertube.create();
 
-    const info =
-      await youtube.getInfo(url);
+    const info = await youtube.getInfo(ytUrl);
 
     const formats =
       info.streaming_data?.adaptive_formats || [];
 
-    const audio =
-      formats.find(f =>
-        f.mime_type?.includes("audio")
-      );
+    const audioFormat = formats.find(f =>
+      f.mime_type?.includes("audio")
+    );
 
-    if (!audio) {
+    if (!audioFormat?.url) {
 
       return res.status(500).json({
-        error: "No audio format"
+        error: "This video is unavailable"
       });
     }
 
-    res.json({
-      audioUrl: audio.url
-    });
+    const response = await fetch(audioFormat.url);
 
-  } catch(err) {
+    if (!response.ok) {
 
-    console.log(err);
+      return res.status(500).json({
+        error: "Audio fetch failed"
+      });
+    }
+
+    res.setHeader(
+      "Content-Type",
+      "audio/mp4"
+    );
+
+    const stream = PassThrough.fromWeb(
+      response.body
+    );
+
+    stream.pipe(res);
+
+  } catch (err) {
+
+    console.error("YT ERROR:", err);
 
     res.status(500).json({
       error: err.message
