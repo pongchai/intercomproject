@@ -41,7 +41,7 @@ const PORT = process.env.PORT || 8080;
 
 const esp32Clients = [];
 const audioQueue = [];
-const MAX_QUEUE = 40;
+const MAX_QUEUE = 8;
 
 let receiveList = [
   // { id: 'device1', name: 'Device 1', ImageBase64: '', isConnect: 'timestamp' },
@@ -169,7 +169,7 @@ wss.on('connection', ws => {
     const queueLen = audioQueue.length;
 
     if (queueLen > MAX_QUEUE) {
-      audioQueue.splice(0, Math.floor(queueLen / 2));
+      audioQueue.splice(0, queueLen-MAX_QUEUE);
     }
 
     if (audioQueue.length < MAX_QUEUE) {
@@ -198,34 +198,48 @@ setInterval(() => {
   }
 
   // 🔥 STEP 2: ส่งเสียงปกติ
-  if (
-    audioQueue.length > 0 &&
-    esp32Clients.length > 0 &&
-    Array.isArray(receiveSelected)
-  ) {
-    const chunksToSend = audioQueue.splice(0, 3);
-    const finalBuffer = Buffer.concat(chunksToSend);
+  if (!audioQueue.length || !esp32Clients.length ) {
+        return;
+    }
+
+    // ดึงเสียงล่าสุดออกจาก Queue
+    const chunk = audioQueue.shift();
 
     esp32Clients.forEach(client => {
-      try {
-        if (
-          receiveSelected.length === 0 ||
-          receiveSelected.includes(client.deviceId)
-        ) {
-          if (!client.res.writableEnded) {
-            const ok = client.res.write(finalBuffer);
-            if (!ok) {
-              console.log("⚠️ slow client:", client.deviceId);
-            }
-          }
-        }
-      } catch (err) {
-        console.error('[ERROR] Stream failed:', err.message);
-      }
-    });
-  }
 
-}, 50);
+        try {
+
+            const allowSend =
+                receiveSelected.length === 0 ||
+                receiveSelected.includes(
+                    client.deviceId
+                );
+
+            if (!allowSend) {
+                return;
+            }
+
+            // client ยังเชื่อมอยู่
+            if (!client.res.writableEnded) {
+
+                client.res.write(
+                    chunk
+                );
+
+            }
+
+        } catch (e) {
+
+            console.log(
+                "Stream Error:",
+                e
+            );
+
+        }
+
+    });
+
+}, 10);
 
 
 setInterval(() => {
