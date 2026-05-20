@@ -41,7 +41,7 @@ const PORT = process.env.PORT || 8080;
 
 const esp32Clients = [];
 const audioQueue = [];
-const MAX_QUEUE = 200;
+const MAX_QUEUE = 40;
 
 let receiveList = [
   // { id: 'device1', name: 'Device 1', ImageBase64: '', isConnect: 'timestamp' },
@@ -202,7 +202,7 @@ setInterval(() => {
     esp32Clients.length > 0 &&
     Array.isArray(receiveSelected)
   ) {
-    const chunksToSend = audioQueue.splice(0, 6);
+    const chunksToSend = audioQueue.splice(0, 3);
     const finalBuffer = Buffer.concat(chunksToSend);
 
     esp32Clients.forEach(client => {
