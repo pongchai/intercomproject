@@ -41,7 +41,7 @@ const PORT = process.env.PORT || 8080;
 
 const esp32Clients = [];
 const audioQueue = [];
-const MAX_QUEUE = 24;
+const MAX_QUEUE = 30;
 
 let receiveList = [
   // { id: 'device1', name: 'Device 1', ImageBase64: '', isConnect: 'timestamp' },
@@ -204,7 +204,7 @@ setInterval(() => {
 
     // ดึงเสียงล่าสุดออกจาก Queue
     const chunks  = audioQueue.splice(0, Math.min(audioQueue.length,3)); // ดึงทีละ 3 ก้อน (ประมาณ 48ms)
-    const chunk = Buffer.concat(chunks);
+    const finalBuffer  = Buffer.concat(chunks);
     esp32Clients.forEach(client => {
 
         try {
@@ -223,16 +223,16 @@ setInterval(() => {
             if (!client.res.writableEnded) {
 
                 client.res.write(
-                    chunk
+                    finalBuffer
                 );
 
             }
 
-        } catch (e) {
+        } catch (err) {
 
             console.log(
                 "Stream Error:",
-                e
+                err
             );
 
         }
@@ -240,7 +240,7 @@ setInterval(() => {
 
     });
 
-}, 25);
+}, 30);
 
 
 setInterval(() => {
