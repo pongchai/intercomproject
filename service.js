@@ -501,6 +501,59 @@ app.post('/sendText', (req, res) => {
   res.json({ success: true, sentTo: deviceIds.length });
 });
 
+app.post('/playYoutube', async (req, res) => {
+    const { url, devices } = req.body;
+    if (!url) return res.status(400).json({ error: "No URL" });
+
+    try {
+      const yt = await Innertube.create();
+      const info = await yt.getInfo(extractVideoId(url));
+      const format = info.chooseFormat({ type: 'audio', quality: 'best' });
+      const streamUrl = format.decipher(yt.session.player);
+
+      res.json({ success: true, message: "Streaming started" });
+
+      // Stream YouTube audio → ffmpeg → PCM → audioQueue
+      const ffmpegProc = ffmpeg(streamUrl)
+        .inputOptions(['-reconnect 1', '-reconnect_streamed 1'])
+        .outputOptions(['-f s16le', '-acodec pcm_s16le', '-ac 1', '-ar 16000'])
+        .pipe();
+
+      const targetDevices = devices || receiveSelected;
+
+      ffmpegProc.on('data', (chunk) => {
+        // ส่งตรงไปยัง ESP32 clients เลย
+        esp32Clients.forEach(client => {
+          if (
+            targetDevices.length === 0 ||
+            targetDevices.includes(client.deviceId)
+          ) {
+            if (!client.res.writableEnded) {
+              try { client.res.write(chunk); } catch(e) {}
+            }
+          }
+        });
+      });
+
+      ffmpegProc.on('error', (err) => {
+        console.error('[YouTube] ffmpeg error:', err.message);
+      });
+
+      ffmpegProc.on('end', () => {
+        console.log('[YouTube] Stream ended');
+      });
+
+    } catch (err) {
+      console.error('[YouTube]', err);
+      if (!res.headersSent) res.status(500).json({ error: err.message });
+    }
+  });
+
+  // helper
+  function extractVideoId(url) {
+    const m = url.match(/(?:youtube\.com.*[?&]v=|youtu\.be\/)([^&\n?#]+)/);
+    return m ? m[1] : url;
+  }
 
 // API เช็คเวลาปัจจุบัน
 app.get('/time', (req, res) => {
