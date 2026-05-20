@@ -227,7 +227,7 @@ setInterval(() => {
                 );
 
             }
-            
+
         } catch (e) {
 
             console.log(
@@ -237,6 +237,7 @@ setInterval(() => {
 
         }
 
+        
     });
 
 }, 10);
