@@ -625,11 +625,14 @@ setInterval(() => {
     }
 
   }
-
-  // ✅ ย้ายมาอยู่ใน interval
-  receiveList = receiveList.filter(d =>
-    esp32Clients.some(c => c.deviceId === d.id)
-  );
+});
+  setInterval(() => {
+  for (let i = esp32Clients.length - 1; i >= 0; i--) {
+    if (!esp32Clients[i].res?.writableEnded === false || 
+        esp32Clients[i].res.destroyed) {
+      esp32Clients.splice(i, 1);
+    }
+  }
 
 }, 10000);
 
