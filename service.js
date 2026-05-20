@@ -88,6 +88,7 @@ app.get('/stream', async (req, res) => {
     // 🔥 เพิ่ม device เข้า receiveList อัตโนมัติ
     const existsDevice = receiveList.find(d => d.id === deviceId);
 
+    // ✅ ใหม่
     if (!existsDevice) {
       console.log("➕ add device to receiveList:", deviceId);
 
@@ -95,7 +96,7 @@ app.get('/stream', async (req, res) => {
         id: deviceId,
         name: deviceId,
         ImageBase64: '',
-        lastetUpdate: Date.now()
+        lastetUpdate: Date.now() + (7 * 60 * 60 * 1000)  // ✅ UTC+7
       });
     }
 
@@ -292,8 +293,9 @@ app.post("/schedule", (req, res) => {
   const { fileName, schedAt, mode, devices } = req.body;
   if (!fileName || !schedAt) return res.status(400).json({ error: "Missing fields" });
 
+  
   const id = Date.now();
-  const jobTime = new Date(schedAt);
+  const jobTime = new Date(schedAt + "+07:00");
   console.log("[Scheduler] Schedule job at:", jobTime.toString());
 
   const job = schedule.scheduleJob(jobTime, async () => {
@@ -306,14 +308,13 @@ app.post("/schedule", (req, res) => {
 
     if (mode === "ครั้งเดียว") {
       scheduleList = scheduleList.filter(i => i.id !== id);
-    } else if (mode === "ทุกวัน") {
+    // ✅ ใหม่
+    } else if (mode === "ประจำ") {
         const next = new Date(jobTime.getTime() + 24*60*60*1000);
 
         schedule.scheduleJob(next, async () => {
           await playAudioToESP32(fileName, devices || []);
         });
-
-        // 🔥 ไม่ต้อง push ใหม่
       }
   });
 
@@ -553,6 +554,7 @@ server.listen(PORT, () => {
   console.log("Server running on port", PORT);
 });
 
+// ✅ ใหม่
 setInterval(() => {
 
   for (let i = esp32Clients.length - 1; i >= 0; i--) {
@@ -571,12 +573,12 @@ setInterval(() => {
 
   }
 
-}, 10000);
+  // ✅ ย้ายมาอยู่ใน interval
+  receiveList = receiveList.filter(d =>
+    esp32Clients.some(c => c.deviceId === d.id)
+  );
 
-// ลบ device ที่ไม่ได้เชื่อมต่อแล้ว
-receiveList = receiveList.filter(d =>
-  esp32Clients.some(c => c.deviceId === d.id)
-);
+}, 10000);
 
 process.on('uncaughtException', err => {
   console.error('🔥 UNCAUGHT EXCEPTION:', err);
