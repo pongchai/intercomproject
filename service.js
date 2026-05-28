@@ -69,10 +69,11 @@ app.get('/stream', async (req, res) => {
       'Transfer-Encoding': 'chunked'
     });
 
+    const SILENCE_CHUNK = Buffer.alloc(320, 0); // 320 bytes = 10ms ที่ 16kHz
     const keepAlive = setInterval(() => {
-      if (!res.writableEnded) {
-        res.write(" ");
-      }
+        if (!res.writableEnded) {
+            res.write(SILENCE_CHUNK);  
+        }
     }, 2000);
 
     const index = esp32Clients.findIndex(c => c.deviceId === deviceId);
@@ -152,21 +153,19 @@ const server = http.createServer(app);
 // WebSocket Server สำหรับ Browser ส่งเสียง
 const wss = new WebSocket.Server({ server, path: '/broadcast' });
 
-
+let audioLogCount = 0;
 wss.on('connection', ws => {
 
   console.log('[Browser] WebSocket connected');
 
   ws.on('message', msg => {
 
-    console.log(
-      "AUDIO IN:",
-      msg.length
-    );
-
     const buffer = Buffer.from(msg);
 
     const queueLen = audioQueue.length;
+    if (++audioLogCount % 100 === 0) {  // log ทุก 100 packets (~3 วิ)
+        console.log("AUDIO IN:", msg.length, "| queue:", audioQueue.length);
+    }
 
     if (queueLen > MAX_QUEUE) {
       audioQueue.splice(0, queueLen-MAX_QUEUE);
@@ -180,68 +179,39 @@ wss.on('connection', ws => {
 
 });
 
-// ปรับ Interval จาก 1ms เป็น 40-50ms เพื่อให้เหมาะสมกับ Buffer ของ ESP32
-// และส่งข้อมูลเป็นก้อนที่ใหญ่ขึ้นเล็กน้อย
+
+// ===== แทนที่ setInterval ส่งเสียง (บริเวณ setInterval(() => {...}, 30)) =====
+
+const TARGET_QUEUE = 4;       // buffer ที่ต้องการ (ก้อน)
+const SEND_INTERVAL = 32;     // ms ใกล้เคียง 1024 samples / 16000 Hz ≈ 64ms / 2
+
 setInterval(() => {
+    if (esp32Clients.length === 0 || audioQueue.length === 0) return;
 
-  // 🔥 STEP 1: ไม่มี client → หยุด stream ทันที
-  if (esp32Clients.length === 0) {
+    // ✅ Dynamic drain: ถ้า queue ยาวมาก → ดึงมากขึ้น (catch-up)
+    const qLen = audioQueue.length;
+    let toDrain = 1;
+    if (qLen > TARGET_QUEUE * 3) toDrain = 3;   // ค้างมาก → drain เร็ว
+    else if (qLen > TARGET_QUEUE) toDrain = 2;   // ค้างนิดหน่อย → drain ปกติ
 
-    console.log("🛑 no clients");
+    const chunks = audioQueue.splice(0, toDrain);
+    const finalBuffer = Buffer.concat(chunks);
 
-    return;
-  }
-
-  // 🔥 debug log (สุ่ม)
-  if (Math.random() < 0.1) {
-    console.log("Queue:", audioQueue.length, "Clients:", esp32Clients.length);
-  }
-
-  // 🔥 STEP 2: ส่งเสียงปกติ
-  if (!audioQueue.length || !esp32Clients.length ) {
-        return;
-    }
-
-    // ดึงเสียงล่าสุดออกจาก Queue
-    const chunks  = audioQueue.splice(0, Math.min(audioQueue.length,3)); // ดึงทีละ 3 ก้อน (ประมาณ 48ms)
-    const finalBuffer  = Buffer.concat(chunks);
+    
     esp32Clients.forEach(client => {
+        const allowSend =
+            receiveSelected.length === 0 ||
+            receiveSelected.includes(client.deviceId);
+        if (!allowSend || client.res.writableEnded) return;
 
         try {
-
-            const allowSend =
-                receiveSelected.length === 0 ||
-                receiveSelected.includes(
-                    client.deviceId
-                );
-
-            if (!allowSend) {
-                return;
-            }
-
-            // client ยังเชื่อมอยู่
-            if (!client.res.writableEnded) {
-
-                client.res.write(
-                    finalBuffer
-                );
-
-            }
-
+            client.res.write(finalBuffer);
         } catch (err) {
-
-            console.log(
-                "Stream Error:",
-                err
-            );
-
+            console.log("Stream Error:", err);
         }
-
-
     });
 
-}, 30);
-
+}, SEND_INTERVAL);
 
 setInterval(() => {
   if (esp32Clients.length > 0) {
