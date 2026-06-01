@@ -196,6 +196,7 @@ setInterval(() => {
 
     esp32Clients.forEach(client => {
 
+      
         const allowSend =
             receiveSelected.length === 0 ||
             receiveSelected.includes(client.deviceId);
