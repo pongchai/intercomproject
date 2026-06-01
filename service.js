@@ -51,65 +51,57 @@ let receiveSelected = [
   //"id"
 ];
 
-// Route สำหรับ ESP32 เข้ามารับ stream
+// แก้ route /stream
 app.get('/stream', async (req, res) => {
-  try {
-    req.setTimeout(0);
+    try {
+        req.setTimeout(0);
+        const deviceId = req?.query?.deviceId;
+        if (!deviceId) return res.status(400).end();
 
-    const deviceId = req?.query?.deviceId;
+        // ✅ ลบ Transfer-Encoding: chunked ออก ใช้ raw stream แทน
+        res.writeHead(200, {
+            'Content-Type': 'application/octet-stream',
+            'Connection': 'keep-alive',
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',      // ✅ บอก proxy ไม่ให้ buffer
+            'Access-Control-Allow-Origin': '*'
+            // ❌ ลบ 'Transfer-Encoding': 'chunked' ออก — express จัดการเอง
+        });
 
-    if (!deviceId) {
-      return res.status(400).end();
-    }
-    streamStartTime = Date.now();
-    res.writeHead(200, {
-      'Content-Type': 'application/octet-stream',
-      'Connection': 'keep-alive',
-      'Cache-Control': 'no-cache',
-      'Transfer-Encoding': 'chunked'
-    });
+        // ✅ เปลี่ยน silence chunk เป็นขนาดเล็กลง ส่งบ่อยขึ้น
+        const SILENCE_CHUNK = Buffer.alloc(512, 0);  // ลดจาก 1024 → 512
+        const keepAlive = setInterval(() => {
+            if (!res.writableEnded) {
+                res.write(SILENCE_CHUNK);
+            }
+        }, 500);  // ✅ ส่งทุก 500ms แทน 2000ms
 
-    const SILENCE_CHUNK = Buffer.alloc(1024, 0x00);
-    const keepAlive = setInterval(() => {
-        if (!res.writableEnded) {
-            res.write(SILENCE_CHUNK);  
+        const index = esp32Clients.findIndex(c => c.deviceId === deviceId);
+        if (index !== -1) {
+            esp32Clients[index].res = res;
+        } else {
+            esp32Clients.push({ deviceId, res });
         }
-    }, 2000);
 
-    const index = esp32Clients.findIndex(c => c.deviceId === deviceId);
+        const existsDevice = receiveList.find(d => d.id === deviceId);
+        if (!existsDevice) {
+            receiveList.push({
+                id: deviceId,
+                name: deviceId,
+                ImageBase64: '',
+                lastetUpdate: Date.now() + (7 * 60 * 60 * 1000)
+            });
+        }
 
-    if (index !== -1) {
-      console.log("♻️ replace old connection:", deviceId);
+        req.on('close', () => {
+            clearInterval(keepAlive);
+            const idx = esp32Clients.findIndex(c => c.res === res);
+            if (idx !== -1) esp32Clients.splice(idx, 1);
+        });
 
-      esp32Clients[index].res = res; 
-    } else {
-      esp32Clients.push({ deviceId, res });
+    } catch (err) {
+        console.error("STREAM ERROR:", err);
     }
-
-    // 🔥 เพิ่ม device เข้า receiveList อัตโนมัติ
-    const existsDevice = receiveList.find(d => d.id === deviceId);
-
-    // ✅ ใหม่
-    if (!existsDevice) {
-      console.log("➕ add device to receiveList:", deviceId);
-
-      receiveList.push({
-        id: deviceId,
-        name: deviceId,
-        ImageBase64: '',
-        lastetUpdate: Date.now() + (7 * 60 * 60 * 1000)  // ✅ UTC+7
-      });
-    }
-
-    req.on('close', () => {
-      clearInterval(keepAlive);
-      const index = esp32Clients.findIndex(c => c.res === res);
-      if (index !== -1) esp32Clients.splice(index, 1);
-    });
-
-  } catch (err) {
-    console.error("🔥 STREAM ERROR:", err);
-  }
 });
 
 app.get('/receiveList', (req, res) => {
@@ -185,32 +177,37 @@ wss.on('connection', ws => {
 const TARGET_QUEUE = 1;       // buffer ที่ต้องการ (ก้อน)
 const SEND_INTERVAL = 32;     // ms ใกล้เคียง 1024 samples / 16000 Hz ≈ 64ms / 2
 
+// ✅ แก้ setInterval ส่งเสียง
 setInterval(() => {
-
-    if (!audioQueue.length) return;
     if (!esp32Clients.length) return;
 
-    const chunk = audioQueue.shift();
+    // ✅ ส่งทีละ 512 bytes แทน 1024
+    const CHUNK_SIZE = 512;
 
+    if (!audioQueue.length) return;
+
+    const chunk = audioQueue.shift();
     if (!chunk) return;
 
-    esp32Clients.forEach(client => {
+    // ✅ ถ้า chunk ใหญ่กว่า 512 ให้หั่นส่ง
+    for (let offset = 0; offset < chunk.length; offset += CHUNK_SIZE) {
+        const slice = chunk.slice(offset, offset + CHUNK_SIZE);
 
-      
-        const allowSend =
-            receiveSelected.length === 0 ||
-            receiveSelected.includes(client.deviceId);
+        esp32Clients.forEach(client => {
+            const allowSend =
+                receiveSelected.length === 0 ||
+                receiveSelected.includes(client.deviceId);
 
-        if (!allowSend) return;
-        if (client.res.writableEnded) return;
+            if (!allowSend) return;
+            if (client.res.writableEnded) return;
 
-        try {
-            client.res.write(chunk);
-        } catch (err) {
-            console.log(err);
-        }
-
-    });
+            try {
+                client.res.write(slice);
+            } catch (err) {
+                console.error(err);
+            }
+        });
+    }
 
 }, 32);
 
