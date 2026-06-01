@@ -69,7 +69,7 @@ app.get('/stream', async (req, res) => {
       'Transfer-Encoding': 'chunked'
     });
 
-    const SILENCE_CHUNK = Buffer.alloc(1024, 0);
+    const SILENCE_CHUNK = Buffer.alloc(1024, 0x00);
     const keepAlive = setInterval(() => {
         if (!res.writableEnded) {
             res.write(SILENCE_CHUNK);  
