@@ -182,8 +182,8 @@ wss.on('connection', ws => {
 
 // ===== แทนที่ setInterval ส่งเสียง (บริเวณ setInterval(() => {...}, 30)) =====
 
-const TARGET_QUEUE = 4;       // buffer ที่ต้องการ (ก้อน)
-const SEND_INTERVAL = 32;     // ms ใกล้เคียง 1024 samples / 16000 Hz ≈ 64ms / 2
+const TARGET_QUEUE = 1;       // buffer ที่ต้องการ (ก้อน)
+const SEND_INTERVAL = 64;     // ms ใกล้เคียง 1024 samples / 16000 Hz ≈ 64ms / 2
 
 setInterval(() => {
     if (esp32Clients.length === 0 || audioQueue.length === 0) return;
@@ -194,9 +194,10 @@ setInterval(() => {
     if (qLen > TARGET_QUEUE * 3) toDrain = 3;   // ค้างมาก → drain เร็ว
     else if (qLen > TARGET_QUEUE) toDrain = 2;   // ค้างนิดหน่อย → drain ปกติ
 
-    const chunks = audioQueue.splice(0, toDrain);
-    const finalBuffer = Buffer.concat(chunks);
+    const chunk = audioQueue.splice(0, toDrain);
+    const finalBuffer = Buffer.concat(chunk);
 
+    console.log("SEND TO ESP32 =", finalBuffer.length);
     
     esp32Clients.forEach(client => {
         const allowSend =
