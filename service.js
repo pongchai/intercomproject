@@ -186,33 +186,32 @@ const TARGET_QUEUE = 1;       // buffer ที่ต้องการ (ก้�
 const SEND_INTERVAL = 64;     // ms ใกล้เคียง 1024 samples / 16000 Hz ≈ 64ms / 2
 
 setInterval(() => {
-    if (esp32Clients.length === 0 || audioQueue.length === 0) return;
 
-    // ✅ Dynamic drain: ถ้า queue ยาวมาก → ดึงมากขึ้น (catch-up)
-    const qLen = audioQueue.length;
-    let toDrain = 1;
-    if (qLen > TARGET_QUEUE * 3) toDrain = 3;   // ค้างมาก → drain เร็ว
-    else if (qLen > TARGET_QUEUE) toDrain = 2;   // ค้างนิดหน่อย → drain ปกติ
+    if (!audioQueue.length) return;
+    if (!esp32Clients.length) return;
 
-    const chunk = audioQueue.splice(0, toDrain);
-    const finalBuffer = Buffer.concat(chunk);
+    const chunk = audioQueue.shift();
 
-    console.log("SEND TO ESP32 =", finalBuffer.length);
-    
+    if (!chunk) return;
+
     esp32Clients.forEach(client => {
+
         const allowSend =
             receiveSelected.length === 0 ||
             receiveSelected.includes(client.deviceId);
-        if (!allowSend || client.res.writableEnded) return;
+
+        if (!allowSend) return;
+        if (client.res.writableEnded) return;
 
         try {
-            client.res.write(finalBuffer);
+            client.res.write(chunk);
         } catch (err) {
-            console.log("Stream Error:", err);
+            console.log(err);
         }
+
     });
 
-}, SEND_INTERVAL);
+}, 64);
 
 setInterval(() => {
   if (esp32Clients.length > 0) {
