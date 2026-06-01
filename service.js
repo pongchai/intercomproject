@@ -183,7 +183,7 @@ wss.on('connection', ws => {
 // ===== แทนที่ setInterval ส่งเสียง (บริเวณ setInterval(() => {...}, 30)) =====
 
 const TARGET_QUEUE = 1;       // buffer ที่ต้องการ (ก้อน)
-const SEND_INTERVAL = 64;     // ms ใกล้เคียง 1024 samples / 16000 Hz ≈ 64ms / 2
+const SEND_INTERVAL = 32;     // ms ใกล้เคียง 1024 samples / 16000 Hz ≈ 64ms / 2
 
 setInterval(() => {
 
@@ -211,7 +211,7 @@ setInterval(() => {
 
     });
 
-}, 64);
+}, 32);
 
 setInterval(() => {
   if (esp32Clients.length > 0) {
