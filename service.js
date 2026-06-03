@@ -41,7 +41,7 @@ const PORT = process.env.PORT || 8080;
 
 const esp32Clients = [];
 const audioQueue = [];
-const MAX_QUEUE = 30;
+const MAX_QUEUE = 8;
 
 let receiveList = [
   // { id: 'device1', name: 'Device 1', ImageBase64: '', isConnect: 'timestamp' },
@@ -179,17 +179,12 @@ const SEND_INTERVAL = 32;     // ms ใกล้เคียง 1024 samples / 1
 
 // ✅ แก้ setInterval ส่งเสียง
 setInterval(() => {
-    if (!esp32Clients.length) return;
+    if (!esp32Clients.length || !audioQueue.length) return;
 
-    // ✅ ส่งทีละ 512 bytes แทน 1024
     const CHUNK_SIZE = 512;
-
-    if (!audioQueue.length) return;
-
     const chunk = audioQueue.shift();
     if (!chunk) return;
 
-    // ✅ ถ้า chunk ใหญ่กว่า 512 ให้หั่นส่ง
     for (let offset = 0; offset < chunk.length; offset += CHUNK_SIZE) {
         const slice = chunk.slice(offset, offset + CHUNK_SIZE);
 
@@ -198,8 +193,7 @@ setInterval(() => {
                 receiveSelected.length === 0 ||
                 receiveSelected.includes(client.deviceId);
 
-            if (!allowSend) return;
-            if (client.res.writableEnded) return;
+            if (!allowSend || client.res.writableEnded) return;
 
             try {
                 client.res.write(slice);
@@ -208,7 +202,6 @@ setInterval(() => {
             }
         });
     }
-
 }, 32);
 
 setInterval(() => {
