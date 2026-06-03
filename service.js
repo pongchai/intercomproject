@@ -41,7 +41,8 @@ const PORT = process.env.PORT || 8080;
 
 const esp32Clients = [];
 const audioQueue = [];
-const MAX_QUEUE = 8;
+const MAX_QUEUE = 10;
+const SEND_INTERVAL = 64;
 
 let receiveList = [
   // { id: 'device1', name: 'Device 1', ImageBase64: '', isConnect: 'timestamp' },
@@ -181,7 +182,7 @@ const SEND_INTERVAL = 32;     // ms ใกล้เคียง 1024 samples / 1
 setInterval(() => {
     if (!esp32Clients.length || !audioQueue.length) return;
 
-    const CHUNK_SIZE = 512;
+    const CHUNK_SIZE = 2048;
     const chunk = audioQueue.shift();
     if (!chunk) return;
 
@@ -202,7 +203,7 @@ setInterval(() => {
             }
         });
     }
-}, 32);
+}, 64);
 
 setInterval(() => {
   if (esp32Clients.length > 0) {
