@@ -155,24 +155,18 @@ const wss = new WebSocket.Server({ server, path: '/broadcast' });
 
 let audioLogCount = 0;
 wss.on('connection', ws => {
-    console.log('[Browser] WebSocket connected');
-
     ws.on('message', msg => {
         const buffer = Buffer.from(msg);
-        while (audioQueue.length >= MAX_QUEUE) audioQueue.shift();
-        audioQueue.push(buffer);
 
-        // ✅ ส่งทันทีเมื่อได้รับ ไม่รอ interval
-        while (audioQueue.length > 0) {
-            const chunk = audioQueue.shift();
-            if (!chunk) break;
-            esp32Clients.forEach(client => {
-                const allowSend = receiveSelected.length === 0 ||
-                    receiveSelected.includes(client.deviceId);
-                if (!allowSend || client.res.writableEnded) return;
-                try { client.res.write(chunk); } catch (err) {}
-            });
-        }
+        // ✅ ส่งตรงเลยไม่ผ่าน queue
+        esp32Clients.forEach(client => {
+            const allowSend = receiveSelected.length === 0 ||
+                receiveSelected.includes(client.deviceId);
+            if (!allowSend || client.res.writableEnded) return;
+            try { 
+                client.res.write(buffer);
+            } catch (err) {}
+        });
     });
 });
 
