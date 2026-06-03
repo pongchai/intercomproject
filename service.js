@@ -74,10 +74,8 @@ app.get('/stream', async (req, res) => {
         // ✅ เปลี่ยน silence chunk เป็นขนาดเล็กลง ส่งบ่อยขึ้น
         const SILENCE_CHUNK = Buffer.alloc(512, 0);  // ลดจาก 1024 → 512
         const keepAlive = setInterval(() => {
-            if (!res.writableEnded) {
-                res.write(SILENCE_CHUNK);
-            }
-        }, 500);  // ✅ ส่งทุก 500ms แทน 2000ms
+            if (!res.writableEnded) res.write(SILENCE_CHUNK);
+        }, 5000);  // ✅ ส่งทุก 500ms แทน 2000ms
 
         const index = esp32Clients.findIndex(c => c.deviceId === deviceId);
         if (index !== -1) {
@@ -174,27 +172,24 @@ const TARGET_QUEUE = 1;       // buffer ที่ต้องการ (ก้�
 // ✅ แก้ setInterval ส่งเสียง
 setInterval(() => {
     if (!esp32Clients.length) {
-        // ล้าง queue ถ้าไม่มี client เพื่อกัน memory leak
         audioQueue.length = 0;
         return;
     }
 
+    // ถ้าไม่มี audio — ไม่ส่งอะไรเลย ไม่ส่ง silence
     if (!audioQueue.length) return;
 
-    const CHUNK_SIZE = 2048;
     const chunk = audioQueue.shift();
     if (!chunk) return;
 
-    for (let offset = 0; offset < chunk.length; offset += CHUNK_SIZE) {
-        const slice = chunk.slice(offset, offset + CHUNK_SIZE);
-        esp32Clients.forEach(client => {
-            const allowSend = receiveSelected.length === 0 ||
-                receiveSelected.includes(client.deviceId);
-            if (!allowSend || client.res.writableEnded) return;
-            try { client.res.write(slice); } catch (err) {}
-        });
-    }
-}, 64);
+    esp32Clients.forEach(client => {
+        const allowSend = receiveSelected.length === 0 ||
+            receiveSelected.includes(client.deviceId);
+        if (!allowSend || client.res.writableEnded) return;
+        try { client.res.write(chunk); } catch (err) {}
+    });
+
+}, 20);
 
 setInterval(() => {
   if (esp32Clients.length > 0) {
