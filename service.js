@@ -74,8 +74,10 @@ app.get('/stream', async (req, res) => {
         // ✅ เปลี่ยน silence chunk เป็นขนาดเล็กลง ส่งบ่อยขึ้น
         const SILENCE_CHUNK = Buffer.alloc(512, 0);  // ลดจาก 1024 → 512
         const keepAlive = setInterval(() => {
-            if (!res.writableEnded) res.write(SILENCE_CHUNK);
-        }, 5000);  // ✅ ส่งทุก 500ms แทน 2000ms
+            if (!res.writableEnded) {
+                try { res.write(Buffer.alloc(0)); } catch(e) {}
+            }
+        }, 10000);
 
         const index = esp32Clients.findIndex(c => c.deviceId === deviceId);
         if (index !== -1) {
@@ -148,48 +150,29 @@ const wss = new WebSocket.Server({ server, path: '/broadcast' });
 
 let audioLogCount = 0;
 wss.on('connection', ws => {
+    console.log('[Browser] WebSocket connected');
 
-  console.log('[Browser] WebSocket connected');
+    ws.on('message', msg => {
+        const buffer = Buffer.from(msg);
+        while (audioQueue.length >= MAX_QUEUE) audioQueue.shift();
+        audioQueue.push(buffer);
 
-  ws.on('message', msg => {
-      const buffer = Buffer.from(msg);
-
-      // ล้าง queue ถ้าเกิน limit กัน memory overflow
-      while (audioQueue.length >= MAX_QUEUE) {
-          audioQueue.shift();
-      }
-      audioQueue.push(buffer);
-  });
-
+        // ✅ ส่งทันทีเมื่อได้รับ ไม่รอ interval
+        while (audioQueue.length > 0) {
+            const chunk = audioQueue.shift();
+            if (!chunk) break;
+            esp32Clients.forEach(client => {
+                const allowSend = receiveSelected.length === 0 ||
+                    receiveSelected.includes(client.deviceId);
+                if (!allowSend || client.res.writableEnded) return;
+                try { client.res.write(chunk); } catch (err) {}
+            });
+        }
+    });
 });
 
 
-// ===== แทนที่ setInterval ส่งเสียง (บริเวณ setInterval(() => {...}, 30)) =====
-
-const TARGET_QUEUE = 1;       // buffer ที่ต้องการ (ก้อน)
-
-
-// ✅ แก้ setInterval ส่งเสียง
-setInterval(() => {
-    if (!esp32Clients.length) {
-        audioQueue.length = 0;
-        return;
-    }
-
-    // ถ้าไม่มี audio — ไม่ส่งอะไรเลย ไม่ส่ง silence
-    if (!audioQueue.length) return;
-
-    const chunk = audioQueue.shift();
-    if (!chunk) return;
-
-    esp32Clients.forEach(client => {
-        const allowSend = receiveSelected.length === 0 ||
-            receiveSelected.includes(client.deviceId);
-        if (!allowSend || client.res.writableEnded) return;
-        try { client.res.write(chunk); } catch (err) {}
-    });
-
-}, 20);
+// ===== แทนที่ setInterval ส่งเสียง (บริเวณ setInterval(() => {...}, 30)) ====
 
 setInterval(() => {
   if (esp32Clients.length > 0) {
