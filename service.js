@@ -154,22 +154,13 @@ wss.on('connection', ws => {
   console.log('[Browser] WebSocket connected');
 
   ws.on('message', msg => {
+      const buffer = Buffer.from(msg);
 
-    const buffer = Buffer.from(msg);
-
-    const queueLen = audioQueue.length;
-    if (++audioLogCount % 100 === 0) {  // log ทุก 100 packets (~3 วิ)
-        console.log("AUDIO IN:", msg.length, "| queue:", audioQueue.length);
-    }
-
-    if (queueLen > MAX_QUEUE) {
-      audioQueue.splice(0, queueLen-MAX_QUEUE);
-    }
-
-    if (audioQueue.length < MAX_QUEUE) {
+      // ล้าง queue ถ้าเกิน limit กัน memory overflow
+      while (audioQueue.length >= MAX_QUEUE) {
+          audioQueue.shift();
+      }
       audioQueue.push(buffer);
-    }
-
   });
 
 });
@@ -182,7 +173,13 @@ const TARGET_QUEUE = 1;       // buffer ที่ต้องการ (ก้�
 
 // ✅ แก้ setInterval ส่งเสียง
 setInterval(() => {
-    if (!esp32Clients.length || !audioQueue.length) return;
+    if (!esp32Clients.length) {
+        // ล้าง queue ถ้าไม่มี client เพื่อกัน memory leak
+        audioQueue.length = 0;
+        return;
+    }
+
+    if (!audioQueue.length) return;
 
     const CHUNK_SIZE = 2048;
     const chunk = audioQueue.shift();
@@ -190,19 +187,11 @@ setInterval(() => {
 
     for (let offset = 0; offset < chunk.length; offset += CHUNK_SIZE) {
         const slice = chunk.slice(offset, offset + CHUNK_SIZE);
-
         esp32Clients.forEach(client => {
-            const allowSend =
-                receiveSelected.length === 0 ||
+            const allowSend = receiveSelected.length === 0 ||
                 receiveSelected.includes(client.deviceId);
-
             if (!allowSend || client.res.writableEnded) return;
-
-            try {
-                client.res.write(slice);
-            } catch (err) {
-                console.error(err);
-            }
+            try { client.res.write(slice); } catch (err) {}
         });
     }
 }, 64);
