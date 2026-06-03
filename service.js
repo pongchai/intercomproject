@@ -63,7 +63,7 @@ app.get('/stream', async (req, res) => {
 
         // ✅ ลบ Transfer-Encoding: chunked ออก ใช้ raw stream แทน
         res.writeHead(200, {
-            'Content-Type': 'application/octet-stream',
+            'Content-Type': 'audio/pcm',
             'Connection': 'keep-alive',
             'Cache-Control': 'no-cache',
             'X-Accel-Buffering': 'no',      // ✅ บอก proxy ไม่ให้ buffer
