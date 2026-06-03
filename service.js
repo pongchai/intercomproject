@@ -61,28 +61,24 @@ app.get('/stream', async (req, res) => {
         const deviceId = req?.query?.deviceId;
         if (!deviceId) return res.status(400).end();
 
-        // ✅ ลบ Transfer-Encoding: chunked ออก ใช้ raw stream แทน
         res.writeHead(200, {
             'Content-Type': 'audio/pcm',
             'Connection': 'keep-alive',
             'Cache-Control': 'no-cache',
-            'X-Accel-Buffering': 'no',      // ✅ บอก proxy ไม่ให้ buffer
+            'X-Accel-Buffering': 'no',
             'Access-Control-Allow-Origin': '*'
-            // ❌ ลบ 'Transfer-Encoding': 'chunked' ออก — express จัดการเอง
         });
 
-        // ✅ เปลี่ยน silence chunk เป็นขนาดเล็กลง ส่งบ่อยขึ้น
-        const SILENCE_CHUNK = Buffer.alloc(512, 0);  // ลดจาก 1024 → 512
-        // แก้ keepAlive interval ใน route /stream
+        // ✅ ลบ silence buffer ออก ใช้ TCP keepalive แทน
         const keepAlive = setInterval(() => {
             if (!res.writableEnded) {
                 try { 
-                    res.write(Buffer.alloc(512, 0));  // ✅ ส่ง silence จริงๆ แทน empty buffer
+                    res.write(Buffer.alloc(0));  // ✅ empty buffer ไม่มีเสียง
                 } catch(e) {
                     clearInterval(keepAlive);
                 }
             }
-        }, 3000);  // ✅ ทุก 3 วิ แทน 10 วิ
+        }, 3000);
 
         const index = esp32Clients.findIndex(c => c.deviceId === deviceId);
         if (index !== -1) {
