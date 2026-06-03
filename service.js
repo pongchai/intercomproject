@@ -151,18 +151,37 @@ const wss = new WebSocket.Server({ server, path: '/broadcast' });
 
 let audioLogCount = 0;
 wss.on('connection', ws => {
+    let sendTimer = null;
+    let pendingBuf = null;
+
     ws.on('message', msg => {
         const buffer = Buffer.from(msg);
 
-        // ✅ ส่งตรงเลยไม่ผ่าน queue
-        esp32Clients.forEach(client => {
-            const allowSend = receiveSelected.length === 0 ||
-                receiveSelected.includes(client.deviceId);
-            if (!allowSend || client.res.writableEnded) return;
-            try { 
-                client.res.write(buffer);
-            } catch (err) {}
-        });
+        // ✅ รวม buffer เล็กๆ ให้ครบ 2048 ก่อนส่ง
+        if (!pendingBuf) {
+            pendingBuf = buffer;
+        } else {
+            pendingBuf = Buffer.concat([pendingBuf, buffer]);
+        }
+
+        // ส่งทันทีถ้าครบ 2048
+        while (pendingBuf && pendingBuf.length >= 2048) {
+            const chunk = pendingBuf.slice(0, 2048);
+            pendingBuf = pendingBuf.length > 2048 
+                ? pendingBuf.slice(2048) 
+                : null;
+
+            esp32Clients.forEach(client => {
+                const allowSend = receiveSelected.length === 0 ||
+                    receiveSelected.includes(client.deviceId);
+                if (!allowSend || client.res.writableEnded) return;
+                try { client.res.write(chunk); } catch(err) {}
+            });
+        }
+    });
+
+    ws.on('close', () => {
+        pendingBuf = null;
     });
 });
 
