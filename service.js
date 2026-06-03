@@ -45,7 +45,7 @@ const PORT = process.env.PORT || 8080;
 const esp32Clients = [];
 const audioQueue = [];
 const MAX_QUEUE = 10;
-const SEND_INTERVAL = 64;
+const SEND_INTERVAL = 32;
 
 let receiveList = [
   // { id: 'device1', name: 'Device 1', ImageBase64: '', isConnect: 'timestamp' },
