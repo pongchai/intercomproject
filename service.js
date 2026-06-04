@@ -151,6 +151,10 @@ const wss = new WebSocket.Server({ server, path: '/broadcast' });
 
 let audioLogCount = 0;
 wss.on('connection', ws => {
+    console.log('📡 Browser WS connected');
+    console.log('ESP32 clients online:', esp32Clients.length);
+    console.log('receiveSelected:', receiveSelected);
+
     // Jitter buffer: สะสม chunk ก่อน flush ทุก 20ms
     // ป้องกัน TCP แตก packet เล็กๆ → เสียงช็อต
     const FLUSH_INTERVAL_MS = 10;
