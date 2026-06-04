@@ -158,13 +158,18 @@ wss.on('connection', ws => {
     let jitterBuf = Buffer.alloc(0);
 
     function flushToClients() {
+        if (jitterBuf.length === 0) return;
+        if (receiveSelected.length === 0) {  // ✅ ไม่มี device เลือก → ไม่ส่ง
+            jitterBuf = Buffer.alloc(0);
+            return;
+        }
+
         while (jitterBuf.length >= TARGET_CHUNK) {
             const chunk = jitterBuf.slice(0, TARGET_CHUNK);
             jitterBuf = jitterBuf.slice(TARGET_CHUNK);
 
             esp32Clients.forEach(client => {
-                const allowSend = receiveSelected.length === 0 ||
-                    receiveSelected.includes(client.deviceId);
+                const allowSend = receiveSelected.includes(client.deviceId);
                 if (!allowSend || client.res.writableEnded) return;
                 try { client.res.write(chunk); } catch(err) {}
             });
@@ -182,6 +187,8 @@ wss.on('connection', ws => {
 
     ws.on('close', () => {
         jitterBuf = Buffer.alloc(0);
+        receiveSelected = []; // ✅ reset เมื่อ browser หลุด
+        console.log('📡 Browser WS disconnected');
     });
 });
 
@@ -568,32 +575,25 @@ server.listen(PORT, () => {
 });
 
 // ✅ ใหม่
+// เดิม — logic กลับด้าน
 setInterval(() => {
-
   for (let i = esp32Clients.length - 1; i >= 0; i--) {
-
-    if (
-      !esp32Clients[i].res ||
-      esp32Clients[i].res.writableEnded ||
-      esp32Clients[i].res.destroyed
-    ) {
-
-      console.log("🧹 remove dead client:", esp32Clients[i].deviceId);
-
-      esp32Clients.splice(i, 1);
-
-    }
-
-  }
-});
-  setInterval(() => {
-  for (let i = esp32Clients.length - 1; i >= 0; i--) {
-    if (!esp32Clients[i].res?.writableEnded === false || 
+    if (!esp32Clients[i].res?.writableEnded === false ||  
         esp32Clients[i].res.destroyed) {
       esp32Clients.splice(i, 1);
     }
   }
+}, 10000);
 
+// ✅ แก้เป็น
+setInterval(() => {
+  for (let i = esp32Clients.length - 1; i >= 0; i--) {
+    const r = esp32Clients[i].res;
+    if (!r || r.writableEnded || r.destroyed) {
+      console.log('🧹 remove dead client:', esp32Clients[i].deviceId);
+      esp32Clients.splice(i, 1);
+    }
+  }
 }, 10000);
 
 process.on('uncaughtException', err => {
