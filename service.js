@@ -152,21 +152,12 @@ const wss = new WebSocket.Server({ server, path: '/broadcast' });
 let audioLogCount = 0;
 wss.on('connection', ws => {
     console.log('📡 Browser WS connected');
-    console.log('ESP32 clients online:', esp32Clients.length);
-    console.log('receiveSelected:', receiveSelected);
 
-    // Jitter buffer: สะสม chunk ก่อน flush ทุก 20ms
-    // ป้องกัน TCP แตก packet เล็กๆ → เสียงช็อต
-    const FLUSH_INTERVAL_MS = 20;
-    const TARGET_CHUNK = 2048; // 2048 samples * 2 bytes = 1 frame พอดี
-
+    // ✅ ลด TARGET_CHUNK และส่งทันทีทุกครั้งที่ได้รับ ไม่ต้องรอ timer
+    const TARGET_CHUNK = 2048;
     let jitterBuf = Buffer.alloc(0);
-    let flushTimer = null;
 
     function flushToClients() {
-        if (jitterBuf.length === 0) return;
-
-        // ส่งเป็น chunk ขนาด TARGET_CHUNK เท่าๆ กัน
         while (jitterBuf.length >= TARGET_CHUNK) {
             const chunk = jitterBuf.slice(0, TARGET_CHUNK);
             jitterBuf = jitterBuf.slice(TARGET_CHUNK);
@@ -178,24 +169,18 @@ wss.on('connection', ws => {
                 try { client.res.write(chunk); } catch(err) {}
             });
         }
-        // เศษที่เหลือ (< 4096) ค้างไว้รอรอบหน้า
     }
 
     ws.on('message', msg => {
         jitterBuf = Buffer.concat([jitterBuf, Buffer.from(msg)]);
 
-        // cap buffer ไม่ให้บวม (เกิน ~200ms ทิ้งของเก่า)
-        const MAX_BUF = TARGET_CHUNK * 10; // ~200ms
-        if (jitterBuf.length > MAX_BUF) {
-            jitterBuf = jitterBuf.slice(jitterBuf.length - MAX_BUF);
-        }
+        // ✅ ส่งทันทีทุกครั้งที่ได้รับ message ไม่รอ timer
+        flushToClients();
     });
 
-    // flush สม่ำเสมอทุก 20ms แทนการส่งทันที
-    flushTimer = setInterval(flushToClients, FLUSH_INTERVAL_MS);
+    // ✅ ลบ setInterval flushTimer ออกทั้งหมด
 
     ws.on('close', () => {
-        clearInterval(flushTimer);
         jitterBuf = Buffer.alloc(0);
     });
 });
