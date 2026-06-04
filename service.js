@@ -151,25 +151,21 @@ const wss = new WebSocket.Server({ server, path: '/broadcast' });
 
 let audioLogCount = 0;
 wss.on('connection', ws => {
-    let sendTimer = null;
-    let pendingBuf = null;
+    // Jitter buffer: สะสม chunk ก่อน flush ทุก 20ms
+    // ป้องกัน TCP แตก packet เล็กๆ → เสียงช็อต
+    const FLUSH_INTERVAL_MS = 20;
+    const TARGET_CHUNK = 4096; // 2048 samples * 2 bytes = 1 frame พอดี
 
-    ws.on('message', msg => {
-        const buffer = Buffer.from(msg);
+    let jitterBuf = Buffer.alloc(0);
+    let flushTimer = null;
 
-        // ✅ รวม buffer เล็กๆ ให้ครบ 2048 ก่อนส่ง
-        if (!pendingBuf) {
-            pendingBuf = buffer;
-        } else {
-            pendingBuf = Buffer.concat([pendingBuf, buffer]);
-        }
+    function flushToClients() {
+        if (jitterBuf.length === 0) return;
 
-        // ส่งทันทีถ้าครบ 2048
-        while (pendingBuf && pendingBuf.length >= 2048) {
-            const chunk = pendingBuf.slice(0, 2048);
-            pendingBuf = pendingBuf.length > 2048 
-                ? pendingBuf.slice(2048) 
-                : null;
+        // ส่งเป็น chunk ขนาด TARGET_CHUNK เท่าๆ กัน
+        while (jitterBuf.length >= TARGET_CHUNK) {
+            const chunk = jitterBuf.slice(0, TARGET_CHUNK);
+            jitterBuf = jitterBuf.slice(TARGET_CHUNK);
 
             esp32Clients.forEach(client => {
                 const allowSend = receiveSelected.length === 0 ||
@@ -178,10 +174,25 @@ wss.on('connection', ws => {
                 try { client.res.write(chunk); } catch(err) {}
             });
         }
+        // เศษที่เหลือ (< 4096) ค้างไว้รอรอบหน้า
+    }
+
+    ws.on('message', msg => {
+        jitterBuf = Buffer.concat([jitterBuf, Buffer.from(msg)]);
+
+        // cap buffer ไม่ให้บวม (เกิน ~200ms ทิ้งของเก่า)
+        const MAX_BUF = TARGET_CHUNK * 10; // ~200ms
+        if (jitterBuf.length > MAX_BUF) {
+            jitterBuf = jitterBuf.slice(jitterBuf.length - MAX_BUF);
+        }
     });
 
+    // flush สม่ำเสมอทุก 20ms แทนการส่งทันที
+    flushTimer = setInterval(flushToClients, FLUSH_INTERVAL_MS);
+
     ws.on('close', () => {
-        pendingBuf = null;
+        clearInterval(flushTimer);
+        jitterBuf = Buffer.alloc(0);
     });
 });
 
