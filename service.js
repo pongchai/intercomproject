@@ -153,8 +153,8 @@ let audioLogCount = 0;
 wss.on('connection', ws => {
     // Jitter buffer: สะสม chunk ก่อน flush ทุก 20ms
     // ป้องกัน TCP แตก packet เล็กๆ → เสียงช็อต
-    const FLUSH_INTERVAL_MS = 20;
-    const TARGET_CHUNK = 4096; // 2048 samples * 2 bytes = 1 frame พอดี
+    const FLUSH_INTERVAL_MS = 10;
+    const TARGET_CHUNK = 1024; // 2048 samples * 2 bytes = 1 frame พอดี
 
     let jitterBuf = Buffer.alloc(0);
     let flushTimer = null;
