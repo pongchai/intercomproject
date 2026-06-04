@@ -72,9 +72,7 @@ app.get('/stream', async (req, res) => {
         // ✅ ลบ silence buffer ออก ใช้ TCP keepalive แทน
         const keepAlive = setInterval(() => {
             if (!res.writableEnded) {
-                try { 
-                    res.write(Buffer.alloc(0));  // ✅ empty buffer ไม่มีเสียง
-                } catch(e) {
+                try { res.write(Buffer.alloc(0)); } catch(e) {
                     clearInterval(keepAlive);
                 }
             }
