@@ -207,11 +207,14 @@ setInterval(() => {
 
 async function playAudioToESP32(pcmFile, targetDevices = []) {
   const filePath = path.join(pcmFolder, pcmFile);
-  if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
+  if (!fs.existsSync(filePath)) {
+    console.error('PCM file not found:', pcmFile);
+    return;
+  }
 
-  console.log(`[Scheduler] Starting stream: ${pcmFile}`);
+  console.log(`[Scheduler] Starting stream: ${pcmFile} → devices:`, targetDevices);
 
-  // ส่งข้อความไปโชว์ที่หน้าจอ ESP32
+  // แสดงชื่อไฟล์บนจอ ESP32
   esp32Clients.forEach(client => {
     if (targetDevices.includes(client.deviceId)) {
       esp32Messages[client.deviceId] = "           " + pcmFile;
@@ -221,29 +224,22 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
     }
   });
 
-  // ใช้ Stream เพื่ออ่านไฟล์ทีละนิด ไม่กิน RAM
-  const readStream = fs.createReadStream(filePath, { highWaterMark: 1024 }); // อ่านทีละ 1KB
+  const readStream = fs.createReadStream(filePath, { highWaterMark: 2048 });
 
   for await (const chunk of readStream) {
     esp32Clients.forEach(client => {
-      if (
-        targetDevices.length === 0 ||
-        targetDevices.includes(client.deviceId)
-      ) {
+      if (targetDevices.length === 0 || targetDevices.includes(client.deviceId)) {
         if (!client.res.writableEnded) {
-          try {
-            client.res.write(chunk);
-          } catch (e) {
+          try { client.res.write(chunk); } catch(e) {
             console.error("write fail:", client.deviceId);
           }
         }
       }
     });
-    // หน่วงเวลาเล็กน้อยเพื่อให้สัมพันธ์กับ Sample Rate (16kHz)
-    // 1024 bytes / (16000 samples/sec * 2 bytes/sample) ≈ 32ms
-    await new Promise(r => setTimeout(r, 30));
+    // ✅ 2048 bytes / (16000 * 2) = 64ms
+    await new Promise(r => setTimeout(r, 64));
   }
-  
+
   console.log(`[Scheduler] Finished stream: ${pcmFile}`);
 }
 
@@ -253,32 +249,43 @@ app.post("/schedule", (req, res) => {
   const { fileName, schedAt, mode, devices } = req.body;
   if (!fileName || !schedAt) return res.status(400).json({ error: "Missing fields" });
 
-  
   const id = Date.now();
   const jobTime = new Date(schedAt + "+07:00");
   console.log("[Scheduler] Schedule job at:", jobTime.toString());
 
   const job = schedule.scheduleJob(jobTime, async () => {
-  console.log("[Scheduler] Job triggered at:", new Date().toISOString());
+    console.log("[Scheduler] Job triggered at:", new Date().toISOString());
+    
     if (!esp32Clients.length) {
       console.log("[Scheduler] No ESP32 clients connected");
-      return;
+    } else {
+      // ✅ เล่นเพลงจนจบก่อน
+      await playAudioToESP32(fileName, devices || []);
     }
-    await  playAudioToESP32(fileName, devices || [] );
 
     if (mode === "ครั้งเดียว") {
+      // ✅ ลบหลังเพลงจบแล้ว
       scheduleList = scheduleList.filter(i => i.id !== id);
-    // ✅ ใหม่
-    } else if (mode === "ประจำ") {
-        const next = new Date(jobTime.getTime() + 24*60*60*1000);
+      console.log("[Scheduler] ลบ schedule id:", id);
 
-        schedule.scheduleJob(next, async () => {
+    } else if (mode === "ประจำ") {
+      // ✅ schedule ใหม่วันถัดไปเวลาเดิม
+      const next = new Date(jobTime.getTime() + 24 * 60 * 60 * 1000);
+      const newJob = schedule.scheduleJob(next, async () => {
+        if (esp32Clients.length) {
           await playAudioToESP32(fileName, devices || []);
-        });
+        }
+      });
+      // ✅ อัปเดต job และเวลาใน scheduleList
+      const item = scheduleList.find(i => i.id === id);
+      if (item) {
+        item.job = newJob;
+        item.schedAt = next.toISOString().slice(0, 16).replace('T', ' ');
       }
+    }
   });
 
-  scheduleList.push({ id, fileName, schedAt, mode, job });
+  scheduleList.push({ id, fileName, schedAt, mode, devices, job });
   const sendList = scheduleList.map(({ job, ...rest }) => rest);
   res.json({ scheduleList: sendList, timeNow: new Date().toISOString() });
 });
