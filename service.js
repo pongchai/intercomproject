@@ -151,13 +151,25 @@ let audioLogCount = 0;
 wss.on('connection', ws => {
     console.log('📡 Browser WS connected');
 
-    // ✅ ลด TARGET_CHUNK และส่งทันทีทุกครั้งที่ได้รับ ไม่ต้องรอ timer
     const TARGET_CHUNK = 2048;
     let jitterBuf = Buffer.alloc(0);
+    const SILENCE = Buffer.alloc(TARGET_CHUNK, 0); // silence buffer
+
+    // ✅ ส่ง silence ไปยัง ESP32 ตลอดเวลา กัน underrun
+    const silenceTimer = setInterval(() => {
+        if (receiveSelected.length === 0) return;
+        if (jitterBuf.length > 0) return; // มีข้อมูลจริงอยู่ ไม่ต้องส่ง silence
+
+        esp32Clients.forEach(client => {
+            const allowSend = receiveSelected.includes(client.deviceId);
+            if (!allowSend || client.res.writableEnded) return;
+            try { client.res.write(SILENCE); } catch(err) {}
+        });
+    }, 64); // ทุก 64ms = 2048 bytes ที่ 16kHz
 
     function flushToClients() {
         if (jitterBuf.length === 0) return;
-        if (receiveSelected.length === 0) {  // ✅ ไม่มี device เลือก → ไม่ส่ง
+        if (receiveSelected.length === 0) {
             jitterBuf = Buffer.alloc(0);
             return;
         }
@@ -176,16 +188,13 @@ wss.on('connection', ws => {
 
     ws.on('message', msg => {
         jitterBuf = Buffer.concat([jitterBuf, Buffer.from(msg)]);
-
-        // ✅ ส่งทันทีทุกครั้งที่ได้รับ message ไม่รอ timer
         flushToClients();
     });
 
-    // ✅ ลบ setInterval flushTimer ออกทั้งหมด
-
     ws.on('close', () => {
+        clearInterval(silenceTimer);
         jitterBuf = Buffer.alloc(0);
-        receiveSelected = []; // ✅ reset เมื่อ browser หลุด
+        receiveSelected = [];
         console.log('📡 Browser WS disconnected');
     });
 });
