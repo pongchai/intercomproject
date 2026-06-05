@@ -354,32 +354,31 @@ app.delete("/schedule/:id", (req, res) => {
 
 app.post('/uploadAudio', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-  
-  if (!originalName.endsWith('.mp3')) {
-    fs.unlink(req.file.path, () => {}); // ลบไฟล์ temp ทิ้ง
+
+  // ✅ เช็ค MP3 ก่อนเลย
+  if (!req.file.originalname.toLowerCase().endsWith('.mp3')) {
+    fs.unlink(req.file.path, () => {});
     return res.status(400).json({ error: "รองรับเฉพาะไฟล์ MP3 เท่านั้น" });
   }
 
-  const inputPath = req.file.path;  
+  const inputPath = req.file.path;
   const originalName = req.file.originalname.replace(/\.[^/.]+$/, "");
   const outputName = `${Date.now()}_${originalName}.pcm`;
-  const outputPath = path.join(pcmFolder, outputName);  
+  const outputPath = path.join(pcmFolder, outputName);
 
   try {
     ffmpeg(inputPath)
       .outputOptions([
-        '-f s16le',      // PCM 16-bit little endian
+        '-f s16le',
         '-acodec pcm_s16le',
-        '-ac 1',         // mono channel
-        '-ar 16000'      // 16 kHz sample rate
+        '-ac 1',
+        '-ar 16000'
       ])
       .save(outputPath)
       .on('end', () => {
-        // ลบไฟล์ต้นฉบับหลังแปลงเสร็จ
         fs.unlink(inputPath, err => {
           if (err) console.error('Failed to delete temp file:', err);
         });
-
         res.json({ success: true, pcmFile: outputName });
         console.log('[Upload] PCM created:', outputName);
       })
@@ -387,7 +386,6 @@ app.post('/uploadAudio', upload.single('file'), async (req, res) => {
         console.error('[Upload] FFmpeg error:', err);
         res.status(500).json({ error: err.message });
       });
-
   } catch (err) {
     console.error('[Upload] Unexpected error:', err);
     res.status(500).json({ error: err.message });
