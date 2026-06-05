@@ -354,13 +354,16 @@ app.delete("/schedule/:id", (req, res) => {
 
 app.post('/uploadAudio', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-
-  const inputPath = req.file.path;
-  console.log(req.file);
   
+  if (!originalName.endsWith('.mp3')) {
+    fs.unlink(req.file.path, () => {}); // ลบไฟล์ temp ทิ้ง
+    return res.status(400).json({ error: "รองรับเฉพาะไฟล์ MP3 เท่านั้น" });
+  }
+
+  const inputPath = req.file.path;  
   const originalName = req.file.originalname.replace(/\.[^/.]+$/, "");
   const outputName = `${Date.now()}_${originalName}.pcm`;
-  const outputPath = path.join(pcmFolder, outputName);
+  const outputPath = path.join(pcmFolder, outputName);  
 
   try {
     ffmpeg(inputPath)
