@@ -151,33 +151,34 @@ let audioLogCount = 0;
 wss.on('connection', ws => {
     console.log('📡 Browser WS connected');
 
-    const TARGET_CHUNK = 512; // ลดจาก 2048 → 512
+    const TARGET_CHUNK = 2048;
     let jitterBuf = Buffer.alloc(0);
-    
-    // ✅ ส่งข้อมูลแบบ timer สม่ำเสมอ 16ms = 512 bytes ที่ 16kHz
-    const flushTimer = setInterval(() => {
-        if (jitterBuf.length < TARGET_CHUNK) return;
+
+    function flushToClients() {
+        if (jitterBuf.length === 0) return;
         if (receiveSelected.length === 0) {
             jitterBuf = Buffer.alloc(0);
             return;
         }
 
-        const chunk = jitterBuf.slice(0, TARGET_CHUNK);
-        jitterBuf = jitterBuf.slice(TARGET_CHUNK);
+        while (jitterBuf.length >= TARGET_CHUNK) {
+            const chunk = jitterBuf.slice(0, TARGET_CHUNK);
+            jitterBuf = jitterBuf.slice(TARGET_CHUNK);
 
-        esp32Clients.forEach(client => {
-            const allowSend = receiveSelected.includes(client.deviceId);
-            if (!allowSend || client.res.writableEnded) return;
-            try { client.res.write(chunk); } catch(err) {}
-        });
-    }, 16); // ทุก 16ms
+            esp32Clients.forEach(client => {
+                const allowSend = receiveSelected.includes(client.deviceId);
+                if (!allowSend || client.res.writableEnded) return;
+                try { client.res.write(chunk); } catch(err) {}
+            });
+        }
+    }
 
     ws.on('message', msg => {
         jitterBuf = Buffer.concat([jitterBuf, Buffer.from(msg)]);
+        flushToClients();
     });
 
     ws.on('close', () => {
-        clearInterval(flushTimer);
         jitterBuf = Buffer.alloc(0);
         receiveSelected = [];
         console.log('📡 Browser WS disconnected');
