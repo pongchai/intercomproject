@@ -252,18 +252,23 @@ app.post('/triggerPlay', (req, res) => {
 async function playAudioToESP32(pcmFile, targetDevices = []) {
   console.log(`[Scheduler] Trigger play: ${pcmFile} → devices:`, targetDevices);
 
-  // บอก ESP32 ให้เล่นไฟล์
-  targetDevices.forEach(deviceId => {
+  // ✅ ถ้า devices ว่าง ส่งไปทุก device ที่ connect อยู่
+  const targets = targetDevices.length > 0 
+    ? targetDevices 
+    : esp32Clients.map(c => c.deviceId);
+
+  console.log(`[Scheduler] Sending to:`, targets);
+
+  targets.forEach(deviceId => {
     esp32Messages[deviceId] = "PLAY:" + pcmFile;
   });
 
-  // รอให้เพลงจบ (คำนวณจากขนาดไฟล์)
   const filePath = path.join(pcmFolder, pcmFile);
   if (fs.existsSync(filePath)) {
     const stat = fs.statSync(filePath);
-    const durationMs = (stat.size / 32000) * 1000; // 32000 bytes/s
+    const durationMs = (stat.size / 32000) * 1000;
     console.log(`[Scheduler] Waiting ${Math.round(durationMs/1000)}s for playback`);
-    await new Promise(r => setTimeout(r, durationMs + 2000)); // +2s buffer
+    await new Promise(r => setTimeout(r, durationMs + 2000));
   }
 
   console.log(`[Scheduler] Finished: ${pcmFile}`);
