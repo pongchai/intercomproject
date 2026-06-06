@@ -205,61 +205,66 @@ setInterval(() => {
 
 // schedule
 
-async function playAudioToESP32(pcmFile, targetDevices = []) {
-  const filePath = path.join(pcmFolder, pcmFile);
+// ✅ Endpoint ให้ ESP32 ดึงไฟล์เสียงโดยตรง
+app.get('/audio/:fileName', (req, res) => {
+  const filePath = path.join(pcmFolder, req.params.fileName);
   if (!fs.existsSync(filePath)) {
-    console.error('PCM file not found:', pcmFile);
-    return;
+    return res.status(404).end();
   }
 
-  console.log(`[Scheduler] Starting stream: ${pcmFile}`);
-
-  esp32Clients.forEach(client => {
-    if (targetDevices.includes(client.deviceId)) {
-      esp32Messages[client.deviceId] = "           " + pcmFile;
-      setTimeout(() => { esp32Messages[client.deviceId] = " "; }, 30000);
-    }
+  res.writeHead(200, {
+    'Content-Type': 'audio/pcm',
+    'Connection': 'keep-alive',
+    'Cache-Control': 'no-cache',
+    'Access-Control-Allow-Origin': '*'
   });
 
-  const fileBuffer = fs.readFileSync(filePath);
-  const totalBytes = fileBuffer.length;
-  
-  // ✅ คำนวณเวลาจริงของไฟล์
-  // 16000 samples/s × 2 bytes = 32000 bytes/s
-  const BYTES_PER_SEC = 32000;
-  const totalDurationMs = (totalBytes / BYTES_PER_SEC) * 1000;
-  
-  // ✅ ส่งทีละ 10ms
-  const INTERVAL_MS = 10;
-  const BYTES_PER_INTERVAL = Math.floor(BYTES_PER_SEC * INTERVAL_MS / 1000); // 320 bytes
-  
-  let offset = 0;
-  
-  await new Promise((resolve) => {
-    const timer = setInterval(() => {
-      if (offset >= totalBytes) {
-        clearInterval(timer);
-        resolve();
-        return;
-      }
-      
-      const end = Math.min(offset + BYTES_PER_INTERVAL, totalBytes);
-      const chunk = fileBuffer.slice(offset, end);
-      offset = end;
-      
-      esp32Clients.forEach(client => {
-        if (targetDevices.length === 0 || targetDevices.includes(client.deviceId)) {
-          if (!client.res.writableEnded) {
-            try { client.res.write(chunk); } catch(e) {}
-          }
-        }
-      });
-    }, INTERVAL_MS);
+  fs.createReadStream(filePath).pipe(res);
+});
+
+// ✅ Endpoint รับคำสั่ง trigger แล้วบอก ESP32
+app.post('/triggerPlay', (req, res) => {
+  const { fileName, devices } = req.body;
+  if (!fileName || !devices) {
+    return res.status(400).json({ error: "Missing fields" });
+  }
+
+  devices.forEach(deviceId => {
+    esp32Messages[deviceId] = "PLAY:" + fileName;
   });
+
+  res.json({ success: true });
+});
+
+// ✅ แก้ playAudioToESP32 ให้ส่งคำสั่งแทนส่งไฟล์
+async function playAudioToESP32(pcmFile, targetDevices = []) {
+  console.log(`[Scheduler] Trigger play: ${pcmFile} → devices:`, targetDevices);
+
+  // บอก ESP32 ให้เล่นไฟล์
+  targetDevices.forEach(deviceId => {
+    esp32Messages[deviceId] = "PLAY:" + pcmFile;
+  });
+
+  // รอให้เพลงจบ (คำนวณจากขนาดไฟล์)
+  const filePath = path.join(pcmFolder, pcmFile);
+  if (fs.existsSync(filePath)) {
+    const stat = fs.statSync(filePath);
+    const durationMs = (stat.size / 32000) * 1000; // 32000 bytes/s
+    console.log(`[Scheduler] Waiting ${Math.round(durationMs/1000)}s for playback`);
+    await new Promise(r => setTimeout(r, durationMs + 2000)); // +2s buffer
+  }
 
   console.log(`[Scheduler] Finished: ${pcmFile}`);
 }
 
+// ✅ Clear text หลัง ESP32 รับคำสั่งแล้ว
+app.get('/clearText', (req, res) => {
+  const deviceId = req.query.deviceId;
+  if (deviceId) {
+    esp32Messages[deviceId] = " ";
+  }
+  res.json({ success: true });
+});
 
 // POST /schedule
 app.post("/schedule", (req, res) => {
