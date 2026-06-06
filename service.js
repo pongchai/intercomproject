@@ -221,29 +221,41 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
     }
   });
 
-  // ✅ อ่านทีละ 3200 bytes = 100ms ที่ 16kHz
-  // 16000 samples/s × 2 bytes × 0.1s = 3200 bytes
-  const CHUNK_SIZE = 3200;
-  const CHUNK_DELAY = 100; // ms
-
   const fileBuffer = fs.readFileSync(filePath);
+  const totalBytes = fileBuffer.length;
+  
+  // ✅ คำนวณเวลาจริงของไฟล์
+  // 16000 samples/s × 2 bytes = 32000 bytes/s
+  const BYTES_PER_SEC = 32000;
+  const totalDurationMs = (totalBytes / BYTES_PER_SEC) * 1000;
+  
+  // ✅ ส่งทีละ 10ms
+  const INTERVAL_MS = 10;
+  const BYTES_PER_INTERVAL = Math.floor(BYTES_PER_SEC * INTERVAL_MS / 1000); // 320 bytes
+  
   let offset = 0;
-
-  while (offset < fileBuffer.length) {
-    const chunk = fileBuffer.slice(offset, offset + CHUNK_SIZE);
-    offset += CHUNK_SIZE;
-
-    esp32Clients.forEach(client => {
-      if (targetDevices.length === 0 || targetDevices.includes(client.deviceId)) {
-        if (!client.res.writableEnded) {
-          try { client.res.write(chunk); } catch(e) {}
-        }
+  
+  await new Promise((resolve) => {
+    const timer = setInterval(() => {
+      if (offset >= totalBytes) {
+        clearInterval(timer);
+        resolve();
+        return;
       }
-    });
-
-    // ✅ รอให้ ESP32 เล่นทันก่อนส่ง chunk ถัดไป
-    await new Promise(r => setTimeout(r, CHUNK_DELAY));
-  }
+      
+      const end = Math.min(offset + BYTES_PER_INTERVAL, totalBytes);
+      const chunk = fileBuffer.slice(offset, end);
+      offset = end;
+      
+      esp32Clients.forEach(client => {
+        if (targetDevices.length === 0 || targetDevices.includes(client.deviceId)) {
+          if (!client.res.writableEnded) {
+            try { client.res.write(chunk); } catch(e) {}
+          }
+        }
+      });
+    }, INTERVAL_MS);
+  });
 
   console.log(`[Scheduler] Finished: ${pcmFile}`);
 }
