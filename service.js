@@ -212,35 +212,34 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
     return;
   }
 
-  console.log(`[Scheduler] Starting stream: ${pcmFile} → devices:`, targetDevices);
+  console.log(`[Scheduler] Starting stream: ${pcmFile}`);
 
-  // แสดงชื่อไฟล์บนจอ ESP32
   esp32Clients.forEach(client => {
     if (targetDevices.includes(client.deviceId)) {
       esp32Messages[client.deviceId] = "           " + pcmFile;
-      setTimeout(() => {
-        esp32Messages[client.deviceId] = " ";
-      }, 1000 * 30);
+      setTimeout(() => { esp32Messages[client.deviceId] = " "; }, 30000);
     }
   });
 
-  const readStream = fs.createReadStream(filePath, { highWaterMark: 2048 });
+  // ✅ อ่านทีละ 512 bytes = 16ms ที่ 16kHz
+  const CHUNK_SIZE = 512;
+  // 512 bytes / (16000 samples/s * 2 bytes) = 16ms
+  const CHUNK_DELAY = 16;
+
+  const readStream = fs.createReadStream(filePath, { highWaterMark: CHUNK_SIZE });
 
   for await (const chunk of readStream) {
     esp32Clients.forEach(client => {
       if (targetDevices.length === 0 || targetDevices.includes(client.deviceId)) {
         if (!client.res.writableEnded) {
-          try { client.res.write(chunk); } catch(e) {
-            console.error("write fail:", client.deviceId);
-          }
+          try { client.res.write(chunk); } catch(e) {}
         }
       }
     });
-    // ✅ 2048 bytes / (16000 * 2) = 64ms
-    await new Promise(r => setTimeout(r, 64));
+    await new Promise(r => setTimeout(r, CHUNK_DELAY));
   }
 
-  console.log(`[Scheduler] Finished stream: ${pcmFile}`);
+  console.log(`[Scheduler] Finished: ${pcmFile}`);
 }
 
 
