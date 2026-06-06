@@ -219,7 +219,19 @@ app.get('/audio/:fileName', (req, res) => {
     'Access-Control-Allow-Origin': '*'
   });
 
-  fs.createReadStream(filePath).pipe(res);
+  const CHUNK = 4096;
+  const fd = fs.openSync(filePath, 'r');
+  const buf = Buffer.alloc(CHUNK);
+  let offset = 0;
+
+  function sendChunk() {
+    if (res.writableEnded) return fs.closeSync(fd);
+    const bytesRead = fs.readSync(fd, buf, 0, CHUNK, offset);
+    if (bytesRead === 0) { fs.closeSync(fd); return res.end(); }
+    offset += bytesRead;
+    res.write(buf.slice(0, bytesRead), () => setTimeout(sendChunk, 8));
+  }
+  sendChunk();
 });
 
 // ✅ Endpoint รับคำสั่ง trigger แล้วบอก ESP32
@@ -272,8 +284,22 @@ app.post("/schedule", (req, res) => {
   if (!fileName || !schedAt) return res.status(400).json({ error: "Missing fields" });
 
   const id = Date.now();
-  const jobTime = new Date(schedAt + "+07:00");
-  console.log("[Scheduler] Schedule job at:", jobTime.toString());
+  // ✅ ใหม่ — แปลง "2026-06-07 05:15" → Date object ถูกต้อง
+  const schedAtFixed = schedAt.trim().replace(" ", "T") + ":00+07:00";
+  const jobTime = new Date(schedAtFixed);
+
+  console.log("[Scheduler] schedAt raw:", schedAt);
+  console.log("[Scheduler] jobTime parsed:", jobTime.toString());
+  console.log("[Scheduler] isValid:", !isNaN(jobTime.getTime()));
+  console.log("[Scheduler] diff (sec):", (jobTime.getTime() - Date.now()) / 1000);
+
+  if (isNaN(jobTime.getTime())) {
+    return res.status(400).json({ error: "Invalid date: " + schedAt });
+  }
+
+  if (jobTime.getTime() <= Date.now()) {
+    return res.status(400).json({ error: "เวลาผ่านไปแล้ว กรุณาเลือกเวลาในอนาคต" });
+  }
 
   const job = schedule.scheduleJob(jobTime, async () => {
     console.log("[Scheduler] Job triggered at:", new Date().toISOString());
