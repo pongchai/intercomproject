@@ -221,14 +221,18 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
     }
   });
 
-  // ✅ อ่านทีละ 512 bytes = 16ms ที่ 16kHz
-  const CHUNK_SIZE = 512;
-  // 512 bytes / (16000 samples/s * 2 bytes) = 16ms
-  const CHUNK_DELAY = 16;
+  // ✅ อ่านทีละ 3200 bytes = 100ms ที่ 16kHz
+  // 16000 samples/s × 2 bytes × 0.1s = 3200 bytes
+  const CHUNK_SIZE = 3200;
+  const CHUNK_DELAY = 100; // ms
 
-  const readStream = fs.createReadStream(filePath, { highWaterMark: CHUNK_SIZE });
+  const fileBuffer = fs.readFileSync(filePath);
+  let offset = 0;
 
-  for await (const chunk of readStream) {
+  while (offset < fileBuffer.length) {
+    const chunk = fileBuffer.slice(offset, offset + CHUNK_SIZE);
+    offset += CHUNK_SIZE;
+
     esp32Clients.forEach(client => {
       if (targetDevices.length === 0 || targetDevices.includes(client.deviceId)) {
         if (!client.res.writableEnded) {
@@ -236,6 +240,8 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
         }
       }
     });
+
+    // ✅ รอให้ ESP32 เล่นทันก่อนส่ง chunk ถัดไป
     await new Promise(r => setTimeout(r, CHUNK_DELAY));
   }
 
