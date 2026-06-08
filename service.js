@@ -9,6 +9,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const { Innertube } = require("youtubei.js");
 const { PassThrough } = require("stream");
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+const { performance } = require('perf_hooks');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -202,21 +203,33 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
   const filePath = path.join(pcmFolder, pcmFile);
   if (!fs.existsSync(filePath)) return;
 
-  isPlayingScheduled = true;
   const pcmData = fs.readFileSync(filePath);
 
-  // ส่งทั้งไฟล์แบ่ง chunk ตาม real-time
   const SAMPLE_RATE  = 16000;
   const BYTES_PER_MS = SAMPLE_RATE * 2 / 1000; // 32 bytes/ms
   const CHUNK_MS     = 20;
   const CHUNK_BYTES  = BYTES_PER_MS * CHUNK_MS; // 640 bytes
 
-  console.log(`[Play] ${pcmFile} | ${pcmData.length} bytes`);
+  console.log(`[Play] START ${pcmFile} | ${pcmData.length} bytes`);
 
-  const startWall = Date.now();
+  // ส่ง prebuffer 1 วิก่อนโดยไม่รอ
+  const PREBUF = Math.min(SAMPLE_RATE * 2, pcmData.length); // 1 วิ = 32000 bytes
+  const prebufData = pcmData.slice(0, PREBUF);
+  for (const client of esp32Clients) {
+    if (!targetDevices.includes(client.deviceId)) continue;
+    if (client.res.writableEnded) continue;
+    try { client.res.write(prebufData); } catch(e) {}
+  }
+  console.log(`[Play] Prebuf sent: ${PREBUF} bytes`);
+
+  // หน่วง 200ms ให้ ESP32 รับ prebuffer ก่อน
+  await new Promise(r => setTimeout(r, 200));
+
+  // ส่ง real-time ด้วย high-res timer
+  const startPerf = performance.now();
   let seq = 0;
 
-  for (let i = 0; i < pcmData.length; i += CHUNK_BYTES) {
+  for (let i = PREBUF; i < pcmData.length; i += CHUNK_BYTES) {
     const chunk = pcmData.slice(i, i + CHUNK_BYTES);
 
     for (const client of esp32Clients) {
@@ -226,14 +239,19 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
     }
 
     seq++;
-    // absolute timing — ไม่ drift
-    const targetMs = startWall + seq * CHUNK_MS;
-    const nowMs    = Date.now();
-    const wait     = targetMs - nowMs;
-    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    const targetMs = seq * CHUNK_MS;
+    const elapsed  = performance.now() - startPerf;
+    const wait     = targetMs - elapsed;
+
+    if (wait > 1) {
+      await new Promise(r => setTimeout(r, Math.floor(wait)));
+    } else if (wait > 0) {
+      // busy wait สำหรับ < 1ms
+      const until = performance.now() + wait;
+      while (performance.now() < until) {}
+    }
   }
 
-  isPlayingScheduled = false;
   console.log(`[Play] DONE: ${pcmFile}`);
 }
 
