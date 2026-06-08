@@ -216,27 +216,12 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
   const pcmData = fs.readFileSync(filePath);
   const chunkSize = 1024;
 
-  // ✅ ส่ง silence 500ms ก่อนเพลง กัน pop/click ตอนเริ่ม
-  const SILENCE_MS    = 500;
-  const SILENCE_BYTES = 16000 * 2 * SILENCE_MS / 1000; // 16000 bytes
-  const silence       = Buffer.alloc(SILENCE_BYTES, 0);
-
-  esp32Clients.forEach(client => {
-    if (targetDevices.includes(client.deviceId) && !client.res.writableEnded) {
-      try { client.res.write(silence); } catch(e) {}
-    }
-  });
-
-  // รอ 200ms ให้ ESP32 รับ silence ก่อน
-  await new Promise(r => setTimeout(r, 200));
-
-  // ส่งเพลงตามปกติ
   (async () => {
     for (let i = 0; i < pcmData.length; i += chunkSize) {
       const chunk = pcmData.slice(i, i + chunkSize);
       esp32Clients.forEach(client => {
-        if (targetDevices.includes(client.deviceId) && !client.res.writableEnded) {
-          try { client.res.write(chunk); } catch(e) {}
+        if (targetDevices.includes(client.deviceId)) {
+          try { client.res.write(chunk); } catch {}
         }
       });
       await new Promise(r => setTimeout(r, 1));
