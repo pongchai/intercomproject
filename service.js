@@ -153,26 +153,40 @@ const wss = new WebSocket.Server({ server, path: '/broadcast' });
 
 let audioLogCount = 0;
 wss.on('connection', ws => {
-    // ไม่มี jitter buffer เลย ส่งตรงทันที
-    ws.on('message', msg => {
-        if (receiveSelected.length === 0) return;
-        
-        const data = Buffer.from(msg);
-        
-        // ส่งตรงๆ ไม่ buffer
-        for (const client of esp32Clients) {
-            if (!receiveSelected.includes(client.deviceId)) continue;
-            if (client.res.writableEnded) continue;
-            try { client.res.write(data); } catch(e) {}
-        }
-    });
+  console.log('📡 Browser WS connected');
 
-    ws.on('close', () => {
-        receiveSelected = [];
-        console.log('📡 Browser WS disconnected');
-    });
+  const TARGET_CHUNK = 2048;
+  let jitterBuf = Buffer.alloc(0);
 
-    console.log('📡 Browser WS connected');
+  function flushToClients() {
+    if (jitterBuf.length === 0) return;
+    if (receiveSelected.length === 0) {
+      jitterBuf = Buffer.alloc(0);
+      return;
+    }
+
+    while (jitterBuf.length >= TARGET_CHUNK) {
+      const chunk = jitterBuf.slice(0, TARGET_CHUNK);
+      jitterBuf = jitterBuf.slice(TARGET_CHUNK);
+
+      esp32Clients.forEach(client => {
+        const allowSend = receiveSelected.includes(client.deviceId);
+        if (!allowSend || client.res.writableEnded) return;
+        try { client.res.write(chunk); } catch(err) {}
+      });
+    }
+  }
+
+  ws.on('message', msg => {
+    jitterBuf = Buffer.concat([jitterBuf, Buffer.from(msg)]);
+    flushToClients();
+  });
+
+  ws.on('close', () => {
+    jitterBuf = Buffer.alloc(0);
+    receiveSelected = [];
+    console.log('📡 Browser WS disconnected');
+  });
 });
 
 
@@ -195,64 +209,24 @@ setInterval(() => {
 
 // schedule
 
-
-// เพิ่ม global variable
-let isPlayingScheduled = false;
-
 async function playAudioToESP32(pcmFile, targetDevices = []) {
   const filePath = path.join(pcmFolder, pcmFile);
-  if (!fs.existsSync(filePath)) return;
+  if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
 
   const pcmData = fs.readFileSync(filePath);
+  const chunkSize = 1024;
 
-  const SAMPLE_RATE  = 16000;
-  const BYTES_PER_MS = SAMPLE_RATE * 2 / 1000; // 32 bytes/ms
-  const CHUNK_MS     = 20;
-  const CHUNK_BYTES  = BYTES_PER_MS * CHUNK_MS; // 640 bytes
-
-  console.log(`[Play] START ${pcmFile} | ${pcmData.length} bytes`);
-
-  // ส่ง prebuffer 1 วิก่อนโดยไม่รอ
-  const PREBUF = Math.min(SAMPLE_RATE * 2, pcmData.length); // 1 วิ = 32000 bytes
-  const prebufData = pcmData.slice(0, PREBUF);
-  for (const client of esp32Clients) {
-    if (!targetDevices.includes(client.deviceId)) continue;
-    if (client.res.writableEnded) continue;
-    try { client.res.write(prebufData); } catch(e) {}
-  }
-  console.log(`[Play] Prebuf sent: ${PREBUF} bytes`);
-
-  // หน่วง 200ms ให้ ESP32 รับ prebuffer ก่อน
-  await new Promise(r => setTimeout(r, 200));
-
-  // ส่ง real-time ด้วย high-res timer
-  const startPerf = performance.now();
-  let seq = 0;
-
-  for (let i = PREBUF; i < pcmData.length; i += CHUNK_BYTES) {
-    const chunk = pcmData.slice(i, i + CHUNK_BYTES);
-
-    for (const client of esp32Clients) {
-      if (!targetDevices.includes(client.deviceId)) continue;
-      if (client.res.writableEnded) continue;
-      try { client.res.write(chunk); } catch(e) {}
+  (async () => {
+    for (let i = 0; i < pcmData.length; i += chunkSize) {
+      const chunk = pcmData.slice(i, i + chunkSize);
+      esp32Clients.forEach(client => {
+        if (targetDevices.includes(client.deviceId)) {
+          try { client.res.write(chunk); } catch {}
+        }
+      });
+      await new Promise(r => setTimeout(r, 1));
     }
-
-    seq++;
-    const targetMs = seq * CHUNK_MS;
-    const elapsed  = performance.now() - startPerf;
-    const wait     = targetMs - elapsed;
-
-    if (wait > 1) {
-      await new Promise(r => setTimeout(r, Math.floor(wait)));
-    } else if (wait > 0) {
-      // busy wait สำหรับ < 1ms
-      const until = performance.now() + wait;
-      while (performance.now() < until) {}
-    }
-  }
-
-  console.log(`[Play] DONE: ${pcmFile}`);
+  })();
 }
 
 // POST /schedule
