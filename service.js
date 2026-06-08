@@ -152,26 +152,28 @@ const wss = new WebSocket.Server({ server, path: '/broadcast' });
 
 let audioLogCount = 0;
 wss.on('connection', ws => {
-    console.log('📡 Browser WS connected');
-
-    const TARGET_CHUNK = 320;
     let jitterBuf = Buffer.alloc(0);
+    const TARGET_CHUNK = 320;
 
     function flushToClients() {
-        if (jitterBuf.length === 0) return;
-        if (receiveSelected.length === 0) {
-            jitterBuf = Buffer.alloc(0);
-            return;
-        }
-
+        // ✅ ถ้ามีข้อมูลพอก็ส่งเลย ไม่ต้องรอครบ chunk
         while (jitterBuf.length >= TARGET_CHUNK) {
             const chunk = jitterBuf.slice(0, TARGET_CHUNK);
             jitterBuf = jitterBuf.slice(TARGET_CHUNK);
-
             esp32Clients.forEach(client => {
-                const allowSend = receiveSelected.includes(client.deviceId);
-                if (!allowSend || client.res.writableEnded) return;
-                try { client.res.write(chunk); } catch(err) {}
+                if (!receiveSelected.includes(client.deviceId)) return;
+                if (client.res.writableEnded) return;
+                try { client.res.write(chunk); } catch(e) {}
+            });
+        }
+        // ✅ ส่ง remainder ที่เหลือเลยถ้า buffer ว่างแล้ว
+        if (jitterBuf.length > 0 && jitterBuf.length < TARGET_CHUNK) {
+            const chunk = jitterBuf.slice(0);
+            jitterBuf = Buffer.alloc(0);
+            esp32Clients.forEach(client => {
+                if (!receiveSelected.includes(client.deviceId)) return;
+                if (client.res.writableEnded) return;
+                try { client.res.write(chunk); } catch(e) {}
             });
         }
     }
@@ -184,7 +186,6 @@ wss.on('connection', ws => {
     ws.on('close', () => {
         jitterBuf = Buffer.alloc(0);
         receiveSelected = [];
-        console.log('📡 Browser WS disconnected');
     });
 });
 
@@ -215,39 +216,38 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
 
   const pcmData = fs.readFileSync(filePath);
 
-  const CHUNK_BYTES = 320;  // ✅ 10ms ตรงกับ ESP32
-  const CHUNK_MS    = 8;    // ✅ ส่งเร็วกว่าเล่น 20% กัน underrun
+  const CHUNK_BYTES = 320;
+  // ส่งเร็วกว่า real-time 30% (real-time = 10ms, เราส่ง 7ms)
+  const CHUNK_MS    = 7;
 
-  console.log(`[Play] ${pcmFile} | ${pcmData.length} bytes`);
-
-  // ส่ง prebuffer ก่อนเลย 500ms โดยไม่รอ
-  const PREBUF_BYTES_SEND = 16000;
-  const prebufChunk = pcmData.slice(0, PREBUF_BYTES_SEND);
+  // ส่ง prebuffer ก่อน 1 วิ โดยไม่รอเลย
+  const PREBUF_SIZE = 32000; // 1 วินาที
+  const prebuf = pcmData.slice(0, Math.min(PREBUF_SIZE, pcmData.length));
   esp32Clients.forEach(client => {
     if (targetDevices.includes(client.deviceId) && !client.res.writableEnded) {
-      try { client.res.write(prebufChunk); } catch(e) {}
+      try { client.res.write(prebuf); } catch(e) {}
     }
   });
-  console.log(`[Play] Prebuf sent: ${prebufChunk.length} bytes`);
+  console.log(`[Play] Prebuf: ${prebuf.length} bytes`);
 
-  // ส่ง real-time ที่เหลือ
+  await new Promise(r => setTimeout(r, 50)); // รอ 50ms ให้ TCP flush
+
+  // real-time ที่เหลือ
   const startTime = Date.now();
   let chunkIndex = 0;
+  const startOffset = PREBUF_SIZE;
 
-  for (let i = PREBUF_BYTES_SEND; i < pcmData.length; i += CHUNK_BYTES) {
+  for (let i = startOffset; i < pcmData.length; i += CHUNK_BYTES) {
     const chunk = pcmData.slice(i, i + CHUNK_BYTES);
-
     esp32Clients.forEach(client => {
       if (targetDevices.includes(client.deviceId) && !client.res.writableEnded) {
         try { client.res.write(chunk); } catch(e) {}
       }
     });
-
     chunkIndex++;
     const waitMs = (startTime + chunkIndex * CHUNK_MS) - Date.now();
     if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
   }
-
   console.log(`[Play] DONE: ${pcmFile}`);
 }
 
