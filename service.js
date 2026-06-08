@@ -208,30 +208,28 @@ setInterval(() => {
 // ✅ Endpoint ให้ ESP32 ดึงไฟล์เสียงโดยตรง
 app.get('/audio/:fileName', (req, res) => {
   const filePath = path.join(pcmFolder, req.params.fileName);
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).end();
-  }
+  if (!fs.existsSync(filePath)) return res.status(404).end();
+
+  const stat = fs.statSync(filePath);
 
   res.writeHead(200, {
     'Content-Type': 'audio/pcm',
-    'Connection': 'keep-alive',
+    'Content-Length': stat.size,  // ✅ ต้องมีบรรทัดนี้
     'Cache-Control': 'no-cache',
     'Access-Control-Allow-Origin': '*'
   });
 
-  const CHUNK = 4096;
-  const fd = fs.openSync(filePath, 'r');
-  const buf = Buffer.alloc(CHUNK);
-  let offset = 0;
+  const fileStream = fs.createReadStream(filePath, { highWaterMark: 4096 });
+  fileStream.pipe(res);
 
-  function sendChunk() {
-    if (res.writableEnded) return fs.closeSync(fd);
-    const bytesRead = fs.readSync(fd, buf, 0, CHUNK, offset);
-    if (bytesRead === 0) { fs.closeSync(fd); return res.end(); }
-    offset += bytesRead;
-    res.write(buf.slice(0, bytesRead), () => setTimeout(sendChunk, 8));
-  }
-  sendChunk();
+  fileStream.on('error', (err) => {
+    console.error('[Audio] stream error:', err);
+    res.end();
+  });
+
+  req.on('close', () => {
+    fileStream.destroy();
+  });
 });
 
 // ✅ Endpoint รับคำสั่ง trigger แล้วบอก ESP32
