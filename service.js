@@ -205,6 +205,8 @@ setInterval(() => {
 
 
 async function playAudioToESP32(pcmFile, targetDevices = []) {
+  console.log("[Play] targetDevices:", targetDevices);
+  console.log("[Play] esp32Clients:", esp32Clients.map(c => c.deviceId));
   const filePath = path.join(pcmFolder, pcmFile);
   if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
 
