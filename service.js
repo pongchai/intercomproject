@@ -205,6 +205,8 @@ setInterval(() => {
 
 
 async function playAudioToESP32(pcmFile, targetDevices = []) {
+  console.log("[Play] targetDevices:", targetDevices);
+  console.log("[Play] esp32Clients:", esp32Clients.map(c => c.deviceId));
   const filePath = path.join(pcmFolder, pcmFile);
   if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
 
@@ -286,7 +288,7 @@ app.post("/schedule", (req, res) => {
 
 app.put("/schedule/:id", (req, res) => {
   const id = parseInt(req.params.id);
-  const { fileName, schedAt, mode } = req.body;
+  const { fileName, schedAt, mode, devices } = req.body;
   let item = scheduleList.find(i => i.id === id);
   if (!item) {
     return res.status(404).json({ error: "Schedule not found" });
@@ -298,11 +300,12 @@ app.put("/schedule/:id", (req, res) => {
   item.fileName = fileName;
   item.schedAt = schedAt;
   item.mode = mode;
+  item.devices = devices;
 
   // Reschedule job
   const jobTime = new Date(schedAt);
   item.job = schedule.scheduleJob(jobTime, async () => {
-    await playAudioToESP32(fileName);
+    await playAudioToESP32(fileName, devices || []);
     if (mode === "ครั้งเดียว") {
       scheduleList = scheduleList.filter(i => i.id !== id);
     } else if (mode === "ทุกวัน") {
