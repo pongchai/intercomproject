@@ -154,7 +154,7 @@ let audioLogCount = 0;
 wss.on('connection', ws => {
     console.log('📡 Browser WS connected');
 
-    const TARGET_CHUNK = 2048;
+    const TARGET_CHUNK = 320;
     let jitterBuf = Buffer.alloc(0);
 
     function flushToClients() {
@@ -215,33 +215,26 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
 
   const pcmData = fs.readFileSync(filePath);
 
-  // ส่ง 20ms chunk ถี่ขึ้น กัน Railway throttle
-  const CHUNK_BYTES = 640;   // 20ms
-  const CHUNK_MS    = 20;
+  const CHUNK_BYTES = 320;  // ✅ 10ms ตรงกับ ESP32
+  const CHUNK_MS    = 8;    // ✅ ส่งเร็วกว่าเล่น 20% กัน underrun
 
   console.log(`[Play] ${pcmFile} | ${pcmData.length} bytes`);
 
+  // ส่ง prebuffer ก่อนเลย 500ms โดยไม่รอ
+  const PREBUF_BYTES_SEND = 16000;
+  const prebufChunk = pcmData.slice(0, PREBUF_BYTES_SEND);
+  esp32Clients.forEach(client => {
+    if (targetDevices.includes(client.deviceId) && !client.res.writableEnded) {
+      try { client.res.write(prebufChunk); } catch(e) {}
+    }
+  });
+  console.log(`[Play] Prebuf sent: ${prebufChunk.length} bytes`);
+
+  // ส่ง real-time ที่เหลือ
   const startTime = Date.now();
   let chunkIndex = 0;
 
-  // ส่ง prebuffer ก่อน 500ms โดยไม่รอ
-  const PREBUF_CHUNKS = 25; // 25 × 20ms = 500ms
-  for (let p = 0; p < PREBUF_CHUNKS && p * CHUNK_BYTES < pcmData.length; p++) {
-    const chunk = pcmData.slice(p * CHUNK_BYTES, (p + 1) * CHUNK_BYTES);
-    esp32Clients.forEach(client => {
-      if (targetDevices.includes(client.deviceId) && !client.res.writableEnded) {
-        try { client.res.write(chunk); } catch(e) {}
-      }
-    });
-  }
-
-  console.log(`[Play] Prebuffer sent (${PREBUF_CHUNKS * CHUNK_BYTES} bytes)`);
-
-  // จากนั้นส่ง real-time
-  const prebufEnd = PREBUF_CHUNKS * CHUNK_BYTES;
-  chunkIndex = PREBUF_CHUNKS;
-
-  for (let i = prebufEnd; i < pcmData.length; i += CHUNK_BYTES) {
+  for (let i = PREBUF_BYTES_SEND; i < pcmData.length; i += CHUNK_BYTES) {
     const chunk = pcmData.slice(i, i + CHUNK_BYTES);
 
     esp32Clients.forEach(client => {
