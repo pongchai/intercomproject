@@ -206,41 +206,32 @@ setInterval(() => {
 
 async function playAudioToESP32(pcmFile, targetDevices = []) {
   const filePath = path.join(pcmFolder, pcmFile);
-  if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
+  if (!fs.existsSync(filePath)) return;
 
   const pcmData = fs.readFileSync(filePath);
 
-  const SAMPLE_RATE  = 16000;
-  const CHUNK_BYTES  = 1600; // 50ms worth of audio (16000 * 2 / 1000 * 50)
-  const CHUNK_MS     = 50;
+  // Railway มักจะ buffer เล็กๆ แล้วปล่อย burst
+  // ใช้ chunk ใหญ่ขึ้น = ลด overhead จาก proxy
+  const CHUNK_BYTES = 3200;  // 100ms
+  const CHUNK_MS    = 100;
 
-  console.log(`[Play] START: ${pcmFile} | size=${pcmData.length} | targets=${targetDevices}`);
+  console.log(`[Play] ${pcmFile} size=${pcmData.length}`);
 
   const startTime = Date.now();
-  let chunkIndex  = 0;
+  let chunkIndex = 0;
 
   for (let i = 0; i < pcmData.length; i += CHUNK_BYTES) {
     const chunk = pcmData.slice(i, i + CHUNK_BYTES);
 
     esp32Clients.forEach(client => {
       if (targetDevices.includes(client.deviceId) && !client.res.writableEnded) {
-        try { client.res.write(chunk); } catch(e) {
-          console.error('[Play] write error:', e.message);
-        }
+        try { client.res.write(chunk); } catch(e) {}
       }
     });
 
     chunkIndex++;
-
-    // คำนวณว่าควรส่ง chunk ถัดไปตอนไหน (เทียบกับเวลาเริ่ม)
-    const expectedTime = startTime + chunkIndex * CHUNK_MS;
-    const now          = Date.now();
-    const waitMs       = expectedTime - now;
-
-    if (waitMs > 0) {
-      await new Promise(r => setTimeout(r, waitMs));
-    }
-    // ถ้า waitMs <= 0 = ช้าไปแล้ว ส่งต่อได้เลย ไม่รอ
+    const waitMs = (startTime + chunkIndex * CHUNK_MS) - Date.now();
+    if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
   }
 
   console.log(`[Play] DONE: ${pcmFile}`);
