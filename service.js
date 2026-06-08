@@ -208,25 +208,31 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
   const filePath = path.join(pcmFolder, pcmFile);
   if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
 
-  const CHUNK_SIZE = 512;           // 512 bytes = 256 samples
-  const SAMPLE_RATE = 16000;
-  const BYTES_PER_SAMPLE = 2;
-  // เวลาต่อ chunk = (CHUNK_SIZE / BYTES_PER_SAMPLE) / SAMPLE_RATE * 1000 ms
-  const DELAY_MS = (CHUNK_SIZE / BYTES_PER_SAMPLE) / SAMPLE_RATE * 1000; // ~16ms
-
   const pcmData = fs.readFileSync(filePath);
+
+  const SAMPLE_RATE   = 16000;
+  const BYTES_PER_MS  = (SAMPLE_RATE * 2) / 1000; // 32 bytes/ms
+  const CHUNK_MS      = 20;                         // ส่งทุก 20ms
+  const CHUNK_SIZE    = BYTES_PER_MS * CHUNK_MS;    // 640 bytes
+
+  console.log(`[Play] ${pcmFile} → ${targetDevices} | chunk=${CHUNK_SIZE}B every ${CHUNK_MS}ms`);
 
   for (let i = 0; i < pcmData.length; i += CHUNK_SIZE) {
     const chunk = pcmData.slice(i, i + CHUNK_SIZE);
 
     esp32Clients.forEach(client => {
       if (targetDevices.includes(client.deviceId)) {
-        try { client.res.write(chunk); } catch {}
+        if (!client.res.writableEnded) {
+          try { client.res.write(chunk); } catch(e) {}
+        }
       }
     });
 
-    await new Promise(r => setTimeout(r, DELAY_MS));
+    // รอให้ตรงกับ real-time ของเสียง
+    await new Promise(r => setTimeout(r, CHUNK_MS));
   }
+
+  console.log(`[Play] Done: ${pcmFile}`);
 }
 
 // POST /schedule
