@@ -152,41 +152,26 @@ const wss = new WebSocket.Server({ server, path: '/broadcast' });
 
 let audioLogCount = 0;
 wss.on('connection', ws => {
-    let jitterBuf = Buffer.alloc(0);
-    const TARGET_CHUNK = 320;
-
-    function flushToClients() {
-        // ✅ ถ้ามีข้อมูลพอก็ส่งเลย ไม่ต้องรอครบ chunk
-        while (jitterBuf.length >= TARGET_CHUNK) {
-            const chunk = jitterBuf.slice(0, TARGET_CHUNK);
-            jitterBuf = jitterBuf.slice(TARGET_CHUNK);
-            esp32Clients.forEach(client => {
-                if (!receiveSelected.includes(client.deviceId)) return;
-                if (client.res.writableEnded) return;
-                try { client.res.write(chunk); } catch(e) {}
-            });
-        }
-        // ✅ ส่ง remainder ที่เหลือเลยถ้า buffer ว่างแล้ว
-        if (jitterBuf.length > 0 && jitterBuf.length < TARGET_CHUNK) {
-            const chunk = jitterBuf.slice(0);
-            jitterBuf = Buffer.alloc(0);
-            esp32Clients.forEach(client => {
-                if (!receiveSelected.includes(client.deviceId)) return;
-                if (client.res.writableEnded) return;
-                try { client.res.write(chunk); } catch(e) {}
-            });
-        }
-    }
-
+    // ไม่มี jitter buffer เลย ส่งตรงทันที
     ws.on('message', msg => {
-        jitterBuf = Buffer.concat([jitterBuf, Buffer.from(msg)]);
-        flushToClients();
+        if (receiveSelected.length === 0) return;
+        
+        const data = Buffer.from(msg);
+        
+        // ส่งตรงๆ ไม่ buffer
+        for (const client of esp32Clients) {
+            if (!receiveSelected.includes(client.deviceId)) continue;
+            if (client.res.writableEnded) continue;
+            try { client.res.write(data); } catch(e) {}
+        }
     });
 
     ws.on('close', () => {
-        jitterBuf = Buffer.alloc(0);
         receiveSelected = [];
+        console.log('📡 Browser WS disconnected');
     });
+
+    console.log('📡 Browser WS connected');
 });
 
 
@@ -210,44 +195,45 @@ setInterval(() => {
 // schedule
 
 
+// เพิ่ม global variable
+let isPlayingScheduled = false;
+
 async function playAudioToESP32(pcmFile, targetDevices = []) {
   const filePath = path.join(pcmFolder, pcmFile);
   if (!fs.existsSync(filePath)) return;
 
+  isPlayingScheduled = true;
   const pcmData = fs.readFileSync(filePath);
 
-  const CHUNK_BYTES = 320;
-  // ส่งเร็วกว่า real-time 30% (real-time = 10ms, เราส่ง 7ms)
-  const CHUNK_MS    = 7;
+  // ส่งทั้งไฟล์แบ่ง chunk ตาม real-time
+  const SAMPLE_RATE  = 16000;
+  const BYTES_PER_MS = SAMPLE_RATE * 2 / 1000; // 32 bytes/ms
+  const CHUNK_MS     = 20;
+  const CHUNK_BYTES  = BYTES_PER_MS * CHUNK_MS; // 640 bytes
 
-  // ส่ง prebuffer ก่อน 1 วิ โดยไม่รอเลย
-  const PREBUF_SIZE = 32000; // 1 วินาที
-  const prebuf = pcmData.slice(0, Math.min(PREBUF_SIZE, pcmData.length));
-  esp32Clients.forEach(client => {
-    if (targetDevices.includes(client.deviceId) && !client.res.writableEnded) {
-      try { client.res.write(prebuf); } catch(e) {}
-    }
-  });
-  console.log(`[Play] Prebuf: ${prebuf.length} bytes`);
+  console.log(`[Play] ${pcmFile} | ${pcmData.length} bytes`);
 
-  await new Promise(r => setTimeout(r, 50)); // รอ 50ms ให้ TCP flush
+  const startWall = Date.now();
+  let seq = 0;
 
-  // real-time ที่เหลือ
-  const startTime = Date.now();
-  let chunkIndex = 0;
-  const startOffset = PREBUF_SIZE;
-
-  for (let i = startOffset; i < pcmData.length; i += CHUNK_BYTES) {
+  for (let i = 0; i < pcmData.length; i += CHUNK_BYTES) {
     const chunk = pcmData.slice(i, i + CHUNK_BYTES);
-    esp32Clients.forEach(client => {
-      if (targetDevices.includes(client.deviceId) && !client.res.writableEnded) {
-        try { client.res.write(chunk); } catch(e) {}
-      }
-    });
-    chunkIndex++;
-    const waitMs = (startTime + chunkIndex * CHUNK_MS) - Date.now();
-    if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
+
+    for (const client of esp32Clients) {
+      if (!targetDevices.includes(client.deviceId)) continue;
+      if (client.res.writableEnded) continue;
+      try { client.res.write(chunk); } catch(e) {}
+    }
+
+    seq++;
+    // absolute timing — ไม่ drift
+    const targetMs = startWall + seq * CHUNK_MS;
+    const nowMs    = Date.now();
+    const wait     = targetMs - nowMs;
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
   }
+
+  isPlayingScheduled = false;
   console.log(`[Play] DONE: ${pcmFile}`);
 }
 
