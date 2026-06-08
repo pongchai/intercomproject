@@ -210,29 +210,40 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
 
   const pcmData = fs.readFileSync(filePath);
 
-  const SAMPLE_RATE   = 16000;
-  const BYTES_PER_MS  = (SAMPLE_RATE * 2) / 1000; // 32 bytes/ms
-  const CHUNK_MS      = 20;                         // ส่งทุก 20ms
-  const CHUNK_SIZE    = BYTES_PER_MS * CHUNK_MS;    // 640 bytes
+  const SAMPLE_RATE  = 16000;
+  const CHUNK_BYTES  = 1600; // 50ms worth of audio (16000 * 2 / 1000 * 50)
+  const CHUNK_MS     = 50;
 
-  console.log(`[Play] ${pcmFile} → ${targetDevices} | chunk=${CHUNK_SIZE}B every ${CHUNK_MS}ms`);
+  console.log(`[Play] START: ${pcmFile} | size=${pcmData.length} | targets=${targetDevices}`);
 
-  for (let i = 0; i < pcmData.length; i += CHUNK_SIZE) {
-    const chunk = pcmData.slice(i, i + CHUNK_SIZE);
+  const startTime = Date.now();
+  let chunkIndex  = 0;
+
+  for (let i = 0; i < pcmData.length; i += CHUNK_BYTES) {
+    const chunk = pcmData.slice(i, i + CHUNK_BYTES);
 
     esp32Clients.forEach(client => {
-      if (targetDevices.includes(client.deviceId)) {
-        if (!client.res.writableEnded) {
-          try { client.res.write(chunk); } catch(e) {}
+      if (targetDevices.includes(client.deviceId) && !client.res.writableEnded) {
+        try { client.res.write(chunk); } catch(e) {
+          console.error('[Play] write error:', e.message);
         }
       }
     });
 
-    // รอให้ตรงกับ real-time ของเสียง
-    await new Promise(r => setTimeout(r, CHUNK_MS));
+    chunkIndex++;
+
+    // คำนวณว่าควรส่ง chunk ถัดไปตอนไหน (เทียบกับเวลาเริ่ม)
+    const expectedTime = startTime + chunkIndex * CHUNK_MS;
+    const now          = Date.now();
+    const waitMs       = expectedTime - now;
+
+    if (waitMs > 0) {
+      await new Promise(r => setTimeout(r, waitMs));
+    }
+    // ถ้า waitMs <= 0 = ช้าไปแล้ว ส่งต่อได้เลย ไม่รอ
   }
 
-  console.log(`[Play] Done: ${pcmFile}`);
+  console.log(`[Play] DONE: ${pcmFile}`);
 }
 
 // POST /schedule
