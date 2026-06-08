@@ -147,32 +147,39 @@ const wss = new WebSocket.Server({ server, path: '/broadcast' });
 
 let audioLogCount = 0;
 wss.on('connection', ws => {
+    console.log('📡 Browser WS connected');
+
     const TARGET_CHUNK = 2048;
     let jitterBuf = Buffer.alloc(0);
-    let lastDataTime = Date.now();
 
-    // ✅ เพิ่ม — ส่ง silence เมื่อไม่มีข้อมูลนาน > 100ms
-    const silenceInterval = setInterval(() => {
-        if (Date.now() - lastDataTime > 100) {
-            const silence = Buffer.alloc(TARGET_CHUNK, 0);
+    function flushToClients() {
+        if (jitterBuf.length === 0) return;
+        if (receiveSelected.length === 0) {
+            jitterBuf = Buffer.alloc(0);
+            return;
+        }
+
+        while (jitterBuf.length >= TARGET_CHUNK) {
+            const chunk = jitterBuf.slice(0, TARGET_CHUNK);
+            jitterBuf = jitterBuf.slice(TARGET_CHUNK);
+
             esp32Clients.forEach(client => {
-                if (receiveSelected.includes(client.deviceId) && !client.res.writableEnded) {
-                    try { client.res.write(silence); } catch(e) {}
-                }
+                const allowSend = receiveSelected.includes(client.deviceId);
+                if (!allowSend || client.res.writableEnded) return;
+                try { client.res.write(chunk); } catch(err) {}
             });
         }
-    }, 80);
+    }
 
     ws.on('message', msg => {
-        lastDataTime = Date.now(); // ✅ อัปเดตเวลา
         jitterBuf = Buffer.concat([jitterBuf, Buffer.from(msg)]);
         flushToClients();
     });
 
     ws.on('close', () => {
-        clearInterval(silenceInterval); // ✅ cleanup
         jitterBuf = Buffer.alloc(0);
         receiveSelected = [];
+        console.log('📡 Browser WS disconnected');
     });
 });
 
@@ -198,29 +205,23 @@ setInterval(() => {
 
 
 async function playAudioToESP32(pcmFile, targetDevices = []) {
-    console.log("[Play] targetDevices:", targetDevices);
-    console.log("[Play] esp32Clients:", esp32Clients.map(c => c.deviceId));
-    
-    const filePath = path.join(pcmFolder, pcmFile);
-    if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
+  const filePath = path.join(pcmFolder, pcmFile);
+  if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
 
-    const pcmData = fs.readFileSync(filePath);
-    const chunkSize = 1024;
+  const pcmData = fs.readFileSync(filePath);
+  const chunkSize = 1024;
 
-    // ✅ 1024 bytes ที่ 16kHz 16bit mono = 32ms ต่อ chunk
-    const delayMs = Math.floor(chunkSize / 32); // = 32ms
-
-    (async () => {
-        for (let i = 0; i < pcmData.length; i += chunkSize) {
-            const chunk = pcmData.slice(i, i + chunkSize);
-            esp32Clients.forEach(client => {
-                if (targetDevices.includes(client.deviceId) && !client.res.writableEnded) {
-                    try { client.res.write(chunk); } catch(e) {}
-                }
-            });
-            await new Promise(r => setTimeout(r, delayMs)); // ✅ 32ms แทน 1ms
+  (async () => {
+    for (let i = 0; i < pcmData.length; i += chunkSize) {
+      const chunk = pcmData.slice(i, i + chunkSize);
+      esp32Clients.forEach(client => {
+        if (targetDevices.includes(client.deviceId)) {
+          try { client.res.write(chunk); } catch {}
         }
-    })();
+      });
+      await new Promise(r => setTimeout(r, 1));
+    }
+  })();
 }
 
 // POST /schedule
