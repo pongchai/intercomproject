@@ -205,25 +205,28 @@ setInterval(() => {
 
 
 async function playAudioToESP32(pcmFile, targetDevices = []) {
-  console.log("[Play] targetDevices:", targetDevices);
-  console.log("[Play] esp32Clients:", esp32Clients.map(c => c.deviceId));
   const filePath = path.join(pcmFolder, pcmFile);
   if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
 
-  const pcmData = fs.readFileSync(filePath);
-  const chunkSize = 1024;
+  const CHUNK_SIZE = 512;           // 512 bytes = 256 samples
+  const SAMPLE_RATE = 16000;
+  const BYTES_PER_SAMPLE = 2;
+  // เวลาต่อ chunk = (CHUNK_SIZE / BYTES_PER_SAMPLE) / SAMPLE_RATE * 1000 ms
+  const DELAY_MS = (CHUNK_SIZE / BYTES_PER_SAMPLE) / SAMPLE_RATE * 1000; // ~16ms
 
-  (async () => {
-    for (let i = 0; i < pcmData.length; i += chunkSize) {
-      const chunk = pcmData.slice(i, i + chunkSize);
-      esp32Clients.forEach(client => {
-        if (targetDevices.includes(client.deviceId)) {
-          try { client.res.write(chunk); } catch {}
-        }
-      });
-      await new Promise(r => setTimeout(r, 1));
-    }
-  })();
+  const pcmData = fs.readFileSync(filePath);
+
+  for (let i = 0; i < pcmData.length; i += CHUNK_SIZE) {
+    const chunk = pcmData.slice(i, i + CHUNK_SIZE);
+
+    esp32Clients.forEach(client => {
+      if (targetDevices.includes(client.deviceId)) {
+        try { client.res.write(chunk); } catch {}
+      }
+    });
+
+    await new Promise(r => setTimeout(r, DELAY_MS));
+  }
 }
 
 // POST /schedule
