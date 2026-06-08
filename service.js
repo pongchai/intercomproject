@@ -22,9 +22,7 @@ const upload = multer({ dest: 'uploads/' });
 const pcmFolder = path.join(__dirname, 'pcm_files');
 if (!fs.existsSync(pcmFolder)) fs.mkdirSync(pcmFolder);
 
-
 const app = express();
-let streamStartTime = 0;
 
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
@@ -205,73 +203,26 @@ setInterval(() => {
 
 // schedule
 
-// ✅ Endpoint ให้ ESP32 ดึงไฟล์เสียงโดยตรง
-app.get('/audio/:fileName', (req, res) => {
-  const filePath = path.join(pcmFolder, req.params.fileName);
-  if (!fs.existsSync(filePath)) return res.status(404).end();
 
-  const stat = fs.statSync(filePath);
-
-  res.writeHead(200, {
-    'Content-Type': 'audio/pcm',
-    'Content-Length': stat.size,  // ✅ ต้องมีบรรทัดนี้
-    'Cache-Control': 'no-cache',
-    'Access-Control-Allow-Origin': '*'
-  });
-
-  const fileStream = fs.createReadStream(filePath, { highWaterMark: 4096 });
-  fileStream.pipe(res);
-
-  fileStream.on('error', (err) => {
-    console.error('[Audio] stream error:', err);
-    res.end();
-  });
-
-  req.on('close', () => {
-    fileStream.destroy();
-  });
-});
-
-// ✅ Endpoint รับคำสั่ง trigger แล้วบอก ESP32
-app.post('/triggerPlay', (req, res) => {
-  const { fileName, devices } = req.body;
-  if (!fileName || !devices) {
-    return res.status(400).json({ error: "Missing fields" });
-  }
-
-  devices.forEach(deviceId => {
-    esp32Messages[deviceId] = "PLAY:" + fileName;
-  });
-
-  res.json({ success: true });
-});
-
-// แก้ playAudioToESP32 — แค่ set คำสั่ง ไม่ต้อง wait
 async function playAudioToESP32(pcmFile, targetDevices = []) {
-  console.log(`[Scheduler] Trigger play: ${pcmFile} → devices:`, targetDevices);
+  const filePath = path.join(pcmFolder, pcmFile);
+  if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
 
-  const targets = targetDevices.length > 0 
-    ? targetDevices 
-    : esp32Clients.map(c => c.deviceId);
+  const pcmData = fs.readFileSync(filePath);
+  const chunkSize = 1024;
 
-  console.log(`[Scheduler] Sending PLAY command to:`, targets);
-
-  targets.forEach(deviceId => {
-    esp32Messages[deviceId] = "PLAY:" + pcmFile;
-  });
-
-  // ✅ ไม่ต้อง wait — ESP32 จะรับคำสั่งเองใน textTask
-  console.log(`[Scheduler] Command sent: ${pcmFile}`);
+  (async () => {
+    for (let i = 0; i < pcmData.length; i += chunkSize) {
+      const chunk = pcmData.slice(i, i + chunkSize);
+      esp32Clients.forEach(client => {
+        if (targetDevices.includes(client.deviceId)) {
+          try { client.res.write(chunk); } catch {}
+        }
+      });
+      await new Promise(r => setTimeout(r, 1));
+    }
+  })();
 }
-
-// ✅ Clear text หลัง ESP32 รับคำสั่งแล้ว
-app.get('/clearText', (req, res) => {
-  const deviceId = req.query.deviceId;
-  if (deviceId) {
-    esp32Messages[deviceId] = " ";
-  }
-  res.json({ success: true });
-});
 
 // POST /schedule
 app.post("/schedule", (req, res) => {
