@@ -73,14 +73,13 @@ app.get('/stream', async (req, res) => {
         res.flushHeaders();
 
         // keepAlive ส่ง silence จริงๆ แทน empty buffer
-        const SILENCE = Buffer.alloc(160, 0); // 5ms silence
+        // เปลี่ยนจาก 1000ms → 20ms และขนาดให้พอดี 16000*2/50 = 640 bytes
+        const SILENCE = Buffer.alloc(640, 0); // 20ms silence
         const keepAlive = setInterval(() => {
-            if (!res.writableEnded) {
-                try { res.write(SILENCE); } catch(e) {
-                    clearInterval(keepAlive);
-                }
+            if (!res.writableEnded && keepAliveActive) {
+                try { res.write(SILENCE); } catch(e) { clearInterval(keepAlive); }
             }
-        }, 1000);
+        }, 20);
 
         const index = esp32Clients.findIndex(c => c.deviceId === deviceId);
         if (index !== -1) {
@@ -157,6 +156,12 @@ wss.on('connection', ws => {
 
   const TARGET_CHUNK = 2048;
   let jitterBuf = Buffer.alloc(0);
+  const warmUp = Buffer.alloc(9600, 0); // 300ms
+  esp32Clients.forEach(client => {
+      if (!client.res.writableEnded) {
+          try { client.res.write(warmUp); } catch(e) {}
+      }
+  });
 
   function flushToClients() {
     if (jitterBuf.length === 0) return;
@@ -177,18 +182,18 @@ wss.on('connection', ws => {
     }
   }
 
-  ws.on('message', msg => {
+  // ใน wss.on('connection')
+let keepAliveActive = true;
+
+ws.on('message', msg => {
+    keepAliveActive = false; // หยุด silence ตอนมีเสียงจริง
     jitterBuf = Buffer.concat([jitterBuf, Buffer.from(msg)]);
     flushToClients();
-  });
-
-  ws.on('close', () => {
-    jitterBuf = Buffer.alloc(0);
-    receiveSelected = [];
-    console.log('📡 Browser WS disconnected');
-  });
 });
 
+ws.on('close', () => {
+    keepAliveActive = true; // เปิด silence กลับมา
+});
 
 // ===== แทนที่ setInterval ส่งเสียง (บริเวณ setInterval(() => {...}, 30)) ====
 
