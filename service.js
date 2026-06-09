@@ -62,25 +62,16 @@ app.get('/stream', async (req, res) => {
         if (!deviceId) return res.status(400).end();
 
         res.writeHead(200, {
-            'Content-Type': 'audio/octet-stream',  // ✅ เปลี่ยนจาก audio/pcm
+            'Content-Type': 'audio/octet-stream',
             'Connection': 'keep-alive',
             'Cache-Control': 'no-cache, no-store',
             'X-Accel-Buffering': 'no',
-            'Transfer-Encoding': 'chunked',         // ✅ เพิ่ม
+            'Transfer-Encoding': 'chunked',
             'Access-Control-Allow-Origin': '*'
         });
-
-        // ✅ flush ทันทีด้วย comment ขนาดเล็ก (กัน Railway buffer)
         res.flushHeaders();
 
-        // keepAlive ส่ง silence จริงๆ แทน empty buffer
-        // เปลี่ยนจาก 1000ms → 20ms และขนาดให้พอดี 16000*2/50 = 640 bytes
-        const SILENCE = Buffer.alloc(3200, 0); // 20ms silence
-        const keepAlive = setInterval(() => {
-            if (!res.writableEnded && keepAliveActive) {
-                try { res.write(SILENCE); } catch(e) { clearInterval(keepAlive); }
-            }
-        }, 100);
+        // ✅ ไม่มี keepAlive interval เลย — ไม่ส่งอะไรตอนเงียบ
 
         const index = esp32Clients.findIndex(c => c.deviceId === deviceId);
         if (index !== -1) {
@@ -100,7 +91,6 @@ app.get('/stream', async (req, res) => {
         }
 
         req.on('close', () => {
-            clearInterval(keepAlive);
             const idx = esp32Clients.findIndex(c => c.res === res);
             if (idx !== -1) esp32Clients.splice(idx, 1);
         });
@@ -215,20 +205,7 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
   const pcmData = fs.readFileSync(filePath);
   const chunkSize = 1024;
 
-  // ✅ ส่ง silence 500ms ก่อนเพลง กัน pop/click ตอนเริ่ม
-  const SILENCE_BYTES = 16000 * 2 * 500 / 1000; // 16000 bytes = 500ms
-  const silence = Buffer.alloc(SILENCE_BYTES, 0);
-
-  esp32Clients.forEach(client => {
-    if (targetDevices.includes(client.deviceId) && !client.res.writableEnded) {
-      try { client.res.write(silence); } catch(e) {}
-    }
-  });
-
-  // รอ 200ms ให้ ESP32 รับ silence ก่อน
-  await new Promise(r => setTimeout(r, 200));
-
-  // ส่งเพลงตามปกติ
+  // ส่งเพลงตรงๆ เลย
   (async () => {
     for (let i = 0; i < pcmData.length; i += chunkSize) {
       const chunk = pcmData.slice(i, i + chunkSize);
@@ -241,7 +218,6 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
     }
   })();
 }
-
 // POST /schedule
 app.post("/schedule", (req, res) => {
   const { fileName, schedAt, mode, devices } = req.body;
