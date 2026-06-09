@@ -200,13 +200,16 @@ setInterval(() => {
 
 async function playAudioToESP32(pcmFile, targetDevices = []) {
   const filePath = path.join(pcmFolder, pcmFile);
-  if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
+  if (!fs.existsSync(filePath)) {
+    console.error('PCM file not found:', pcmFile);
+    return;
+  }
 
   const pcmData = fs.readFileSync(filePath);
   const chunkSize = 1024;
 
-  // ส่งเพลงตรงๆ เลย
-  (async () => {
+  // ✅ return Promise เพื่อให้ await รอจนเล่นจบจริง
+  return new Promise(async (resolve) => {
     for (let i = 0; i < pcmData.length; i += chunkSize) {
       const chunk = pcmData.slice(i, i + chunkSize);
       esp32Clients.forEach(client => {
@@ -216,7 +219,8 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
       });
       await new Promise(r => setTimeout(r, 1));
     }
-  })();
+    resolve();
+  });
 }
 // POST /schedule
 app.post("/schedule", (req, res) => {
@@ -224,54 +228,44 @@ app.post("/schedule", (req, res) => {
   if (!fileName || !schedAt) return res.status(400).json({ error: "Missing fields" });
 
   const id = Date.now();
-  // ✅ ใหม่ — แปลง "2026-06-07 05:15" → Date object ถูกต้อง
   const schedAtFixed = schedAt.trim().replace(" ", "T") + ":00+07:00";
   const jobTime = new Date(schedAtFixed);
-
-  console.log("[Scheduler] schedAt raw:", schedAt);
-  console.log("[Scheduler] jobTime parsed:", jobTime.toString());
-  console.log("[Scheduler] isValid:", !isNaN(jobTime.getTime()));
-  console.log("[Scheduler] diff (sec):", (jobTime.getTime() - Date.now()) / 1000);
 
   if (isNaN(jobTime.getTime())) {
     return res.status(400).json({ error: "Invalid date: " + schedAt });
   }
-
   if (jobTime.getTime() <= Date.now()) {
     return res.status(400).json({ error: "เวลาผ่านไปแล้ว กรุณาเลือกเวลาในอนาคต" });
   }
 
-  const job = schedule.scheduleJob(jobTime, async () => {
-    console.log("[Scheduler] Job triggered at:", new Date().toISOString());
-    
-    if (!esp32Clients.length) {
-      console.log("[Scheduler] No ESP32 clients connected");
-    } else {
-      // ✅ เล่นเพลงจนจบก่อน
-      await playAudioToESP32(fileName, devices || []);
-    }
+  let job;
 
-    if (mode === "ครั้งเดียว") {
-      // ✅ ลบหลังเพลงจบแล้ว
+  if (mode === "ครั้งเดียว") {
+    // ✅ schedule ครั้งเดียว พอเล่นจบลบทิ้ง
+    job = schedule.scheduleJob(jobTime, async () => {
+      console.log("[Scheduler] ครั้งเดียว triggered:", fileName);
+      if (esp32Clients.length) {
+        await playAudioToESP32(fileName, devices || []);
+      }
+      // ✅ รอเล่นจบแล้วค่อยลบ
       scheduleList = scheduleList.filter(i => i.id !== id);
       console.log("[Scheduler] ลบ schedule id:", id);
+    });
 
-    } else if (mode === "ประจำ") {
-      // ✅ schedule ใหม่วันถัดไปเวลาเดิม
-      const next = new Date(jobTime.getTime() + 24 * 60 * 60 * 1000);
-      const newJob = schedule.scheduleJob(next, async () => {
-        if (esp32Clients.length) {
-          await playAudioToESP32(fileName, devices || []);
-        }
-      });
-      // ✅ อัปเดต job และเวลาใน scheduleList
-      const item = scheduleList.find(i => i.id === id);
-      if (item) {
-        item.job = newJob;
-        item.schedAt = next.toISOString().slice(0, 16).replace('T', ' ');
+  } else if (mode === "ประจำ") {
+    // ✅ ใช้ cron — ทำงานทุกวันที่เวลานี้ ไม่ต้อง re-schedule
+    const h = jobTime.getUTCHours();    // jobTime อยู่ใน UTC แล้ว (+07:00 ถูก parse แล้ว)
+    const m = jobTime.getUTCMinutes();
+    const cronExpr = `${m} ${h} * * *`;  // ทุกวัน HH:MM (UTC)
+    console.log("[Scheduler] ประจำ cron:", cronExpr);
+
+    job = schedule.scheduleJob(cronExpr, async () => {
+      console.log("[Scheduler] ประจำ triggered:", fileName, new Date().toISOString());
+      if (esp32Clients.length) {
+        await playAudioToESP32(fileName, devices || []);
       }
-    }
-  });
+    });
+  }
 
   scheduleList.push({ id, fileName, schedAt, mode, devices, job });
   const sendList = scheduleList.map(({ job, ...rest }) => rest);
@@ -282,32 +276,32 @@ app.put("/schedule/:id", (req, res) => {
   const id = parseInt(req.params.id);
   const { fileName, schedAt, mode, devices } = req.body;
   let item = scheduleList.find(i => i.id === id);
-  if (!item) {
-    return res.status(404).json({ error: "Schedule not found" });
-  }
-  // Cancel old job if exists
+  if (!item) return res.status(404).json({ error: "Schedule not found" });
+
   if (item.job) item.job.cancel();
 
-  // Update fields
   item.fileName = fileName;
   item.schedAt = schedAt;
   item.mode = mode;
   item.devices = devices;
 
-  // Reschedule job
-  const jobTime = new Date(schedAt);
-  item.job = schedule.scheduleJob(jobTime, async () => {
-    await playAudioToESP32(fileName, devices || []);
-    if (mode === "ครั้งเดียว") {
+  const schedAtFixed = schedAt.trim().replace(" ", "T") + ":00+07:00";
+  const jobTime = new Date(schedAtFixed);
+
+  if (mode === "ครั้งเดียว") {
+    item.job = schedule.scheduleJob(jobTime, async () => {
+      if (esp32Clients.length) await playAudioToESP32(fileName, devices || []);
       scheduleList = scheduleList.filter(i => i.id !== id);
-    } else if (mode === "ทุกวัน") {
-      const next = new Date(jobTime.getTime() + 24*60*60*1000);
-      item.schedAt = next.toISOString();
-      item.job = schedule.scheduleJob(next, async () => {
-        await playAudioToESP32(fileName);
-      });
-    }
-  });
+    });
+
+  } else if (mode === "ประจำ") {
+    const h = jobTime.getUTCHours();
+    const m = jobTime.getUTCMinutes();
+    const cronExpr = `${m} ${h} * * *`;
+    item.job = schedule.scheduleJob(cronExpr, async () => {
+      if (esp32Clients.length) await playAudioToESP32(fileName, devices || []);
+    });
+  }
 
   const sendList = scheduleList.map(({ job, ...rest }) => rest);
   res.json({ scheduleList: sendList });
