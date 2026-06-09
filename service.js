@@ -43,6 +43,7 @@ const PORT = process.env.PORT || 8080;
 
 const esp32Clients = [];
 const audioQueue = [];
+let keepAliveActive = true;
 const MAX_QUEUE = 10;
 
 let receiveList = [
@@ -152,64 +153,61 @@ const wss = new WebSocket.Server({ server, path: '/broadcast' });
 
 let audioLogCount = 0;
 wss.on('connection', ws => {
-  console.log('📡 Browser WS connected');
+    console.log('📡 Browser WS connected');
 
-  const TARGET_CHUNK = 2048;
-  let jitterBuf = Buffer.alloc(0);
-  const warmUp = Buffer.alloc(9600, 0); // 300ms
-  esp32Clients.forEach(client => {
-      if (!client.res.writableEnded) {
-          try { client.res.write(warmUp); } catch(e) {}
-      }
-  });
+    const TARGET_CHUNK = 2048;
+    let jitterBuf = Buffer.alloc(0);
 
-  function flushToClients() {
-    if (jitterBuf.length === 0) return;
-    if (receiveSelected.length === 0) {
-      jitterBuf = Buffer.alloc(0);
-      return;
+    // ✅ warm-up silence
+    const warmUp = Buffer.alloc(9600, 0);
+    esp32Clients.forEach(client => {
+        if (!client.res.writableEnded) {
+            try { client.res.write(warmUp); } catch(e) {}
+        }
+    });
+
+    function flushToClients() {
+        if (jitterBuf.length === 0) return;
+        if (receiveSelected.length === 0) {
+            jitterBuf = Buffer.alloc(0);
+            return;
+        }
+        while (jitterBuf.length >= TARGET_CHUNK) {
+            const chunk = jitterBuf.slice(0, TARGET_CHUNK);
+            jitterBuf = jitterBuf.slice(TARGET_CHUNK);
+            esp32Clients.forEach(client => {
+                const allowSend = receiveSelected.includes(client.deviceId);
+                if (!allowSend || client.res.writableEnded) return;
+                try { client.res.write(chunk); } catch(err) {}
+            });
+        }
     }
 
-    while (jitterBuf.length >= TARGET_CHUNK) {
-      const chunk = jitterBuf.slice(0, TARGET_CHUNK);
-      jitterBuf = jitterBuf.slice(TARGET_CHUNK);
+    ws.on('message', msg => {
+        keepAliveActive = false; // ✅ ปิด silence global
+        jitterBuf = Buffer.concat([jitterBuf, Buffer.from(msg)]);
+        flushToClients();
+    });
 
-      esp32Clients.forEach(client => {
-        const allowSend = receiveSelected.includes(client.deviceId);
-        if (!allowSend || client.res.writableEnded) return;
-        try { client.res.write(chunk); } catch(err) {}
-      });
-    }
-  }
-
-  // ใน wss.on('connection')
-let keepAliveActive = true;
-
-ws.on('message', msg => {
-    keepAliveActive = false; // หยุด silence ตอนมีเสียงจริง
-    jitterBuf = Buffer.concat([jitterBuf, Buffer.from(msg)]);
-    flushToClients();
-});
-
-ws.on('close', () => {
-    keepAliveActive = true; // เปิด silence กลับมา
+    ws.on('close', () => {
+        keepAliveActive = true; // ✅ เปิด silence กลับ
+        jitterBuf = Buffer.alloc(0);
+        receiveSelected = [];
+        console.log('📡 Browser WS disconnected');
+    });
 });
 
 // ===== แทนที่ setInterval ส่งเสียง (บริเวณ setInterval(() => {...}, 30)) ====
 
 setInterval(() => {
-  if (esp32Clients.length > 0) {
-    const now = Date.now() + (7 * 60 * 60 * 1000);
-    
-    // อัปเดตค่าใน Array เดิมโดยตรง
-    receiveList.forEach(device => {
-      const isStillConnected = esp32Clients.some(client => client.deviceId === device.id);
-      if (isStillConnected) {
-        device.lastetUpdate = now;
-      }
-    });
-  }
-}, 15000); // 15 วินาที
+    if (esp32Clients.length > 0) {
+        const now = Date.now() + (7 * 60 * 60 * 1000);
+        receiveList.forEach(device => {
+            const isStillConnected = esp32Clients.some(c => c.deviceId === device.id);
+            if (isStillConnected) device.lastetUpdate = now;
+        });
+    }
+}, 15000);
 
 
 // schedule
