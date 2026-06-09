@@ -75,12 +75,12 @@ app.get('/stream', async (req, res) => {
 
         // keepAlive ส่ง silence จริงๆ แทน empty buffer
         // เปลี่ยนจาก 1000ms → 20ms และขนาดให้พอดี 16000*2/50 = 640 bytes
-        const SILENCE = Buffer.alloc(640, 0); // 20ms silence
+        const SILENCE = Buffer.alloc(3200, 0); // 20ms silence
         const keepAlive = setInterval(() => {
             if (!res.writableEnded && keepAliveActive) {
                 try { res.write(SILENCE); } catch(e) { clearInterval(keepAlive); }
             }
-        }, 20);
+        }, 100);
 
         const index = esp32Clients.findIndex(c => c.deviceId === deviceId);
         if (index !== -1) {
@@ -158,13 +158,9 @@ wss.on('connection', ws => {
     const TARGET_CHUNK = 2048;
     let jitterBuf = Buffer.alloc(0);
 
-    // ✅ warm-up silence
-    const warmUp = Buffer.alloc(9600, 0);
-    esp32Clients.forEach(client => {
-        if (!client.res.writableEnded) {
-            try { client.res.write(warmUp); } catch(e) {}
-        }
-    });
+    // ❌ ลบ warmUp ออก — ทำให้ buffer ท่วมและเกิด pop
+    // const warmUp = Buffer.alloc(9600, 0);
+    // esp32Clients.forEach(client => { ... });
 
     function flushToClients() {
         if (jitterBuf.length === 0) return;
@@ -184,13 +180,13 @@ wss.on('connection', ws => {
     }
 
     ws.on('message', msg => {
-        keepAliveActive = false; // ✅ ปิด silence global
+        keepAliveActive = false;
         jitterBuf = Buffer.concat([jitterBuf, Buffer.from(msg)]);
         flushToClients();
     });
 
     ws.on('close', () => {
-        keepAliveActive = true; // ✅ เปิด silence กลับ
+        keepAliveActive = true;
         jitterBuf = Buffer.alloc(0);
         receiveSelected = [];
         console.log('📡 Browser WS disconnected');
