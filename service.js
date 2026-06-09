@@ -145,7 +145,7 @@ let audioLogCount = 0;
 wss.on('connection', ws => {
     console.log('📡 Browser WS connected');
 
-    const TARGET_CHUNK = 2048;
+    const TARGET_CHUNK = 4096;
     let jitterBuf = Buffer.alloc(0);
 
     // ❌ ลบ warmUp ออก — ทำให้ buffer ท่วมและเกิด pop
