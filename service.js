@@ -208,8 +208,6 @@ setInterval(() => {
 
 // schedule
 
-const fs = require('fs');
-
 async function playAudioToESP32(pcmFile, targetDevices = []) {
   const filePath = path.join(pcmFolder, pcmFile);
   if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
@@ -223,7 +221,7 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
     });
 
     readStream.on('data', async (chunk) => {
-      readStream.pause(); // หยุดรอก่อน
+      readStream.pause();
 
       const targets = esp32Clients.filter(client =>
         targetDevices.includes(client.deviceId) && !client.res.writableEnded
@@ -233,7 +231,7 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
       });
 
       await new Promise(r => setTimeout(r, DELAY_MS));
-      readStream.resume(); // อ่านต่อ
+      readStream.resume();
     });
 
     readStream.on('end', resolve);
