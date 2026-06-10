@@ -233,6 +233,7 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
   });
 }
 // redeploy
+
 // POST /schedule
 app.post("/schedule", (req, res) => {
   const { fileName, schedAt, mode, devices } = req.body;
