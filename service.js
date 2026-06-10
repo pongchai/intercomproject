@@ -212,30 +212,24 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
   const filePath = path.join(pcmFolder, pcmFile);
   if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
 
-  const CHUNK_SIZE = 3200;
-  const DELAY_MS = 100;
+  const pcmData = fs.readFileSync(filePath);
+  const chunkSize = 1024;
 
-  return new Promise((resolve, reject) => {
-    const readStream = fs.createReadStream(filePath, { 
-      highWaterMark: CHUNK_SIZE 
-    });
-
-    readStream.on('data', async (chunk) => {
-      readStream.pause();
+  return new Promise(async (resolve) => {
+    for (let i = 0; i < pcmData.length; i += chunkSize) {
+      const chunk = pcmData.slice(i, i + chunkSize);
 
       const targets = esp32Clients.filter(client =>
         targetDevices.includes(client.deviceId) && !client.res.writableEnded
       );
+
       targets.forEach(client => {
         try { client.res.write(chunk); } catch {}
       });
 
-      await new Promise(r => setTimeout(r, DELAY_MS));
-      readStream.resume();
-    });
-
-    readStream.on('end', resolve);
-    readStream.on('error', reject);
+      await new Promise(r => setTimeout(r, 32));
+    }
+    resolve();
   });
 }
 // redeploy
