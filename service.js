@@ -215,22 +215,17 @@ async function playAudioToESP32(pcmFile, targetDevices = []) {
   const pcmData = fs.readFileSync(filePath);
   const chunkSize = 1024;
 
-  return new Promise(async (resolve) => {
+  (async () => {
     for (let i = 0; i < pcmData.length; i += chunkSize) {
       const chunk = pcmData.slice(i, i + chunkSize);
-
-      const targets = esp32Clients.filter(client =>
-        targetDevices.includes(client.deviceId) && !client.res.writableEnded
-      );
-
-      targets.forEach(client => {
-        try { client.res.write(chunk); } catch {}
+      esp32Clients.forEach(client => {
+        if (targetDevices.includes(client.deviceId)) {
+          try { client.res.write(chunk); } catch {}
+        }
       });
-
-      await new Promise(r => setTimeout(r, 32));
+      await new Promise(r => setTimeout(r, 1));
     }
-    resolve();
-  });
+  })();
 }
 // redeploy
 
