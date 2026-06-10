@@ -146,18 +146,27 @@ wss.on('connection', ws => {
     console.log('📡 Browser WS connected');
 
     const TARGET_CHUNK = 4096;
+    const MIN_BUFFER = TARGET_CHUNK * 3; // ✅ สะสม 3 chunks ก่อนเริ่มส่ง
     let jitterBuf = Buffer.alloc(0);
-
-    // ❌ ลบ warmUp ออก — ทำให้ buffer ท่วมและเกิด pop
-    // const warmUp = Buffer.alloc(9600, 0);
-    // esp32Clients.forEach(client => { ... });
+    let bufferReady = false; // ✅ รอให้ buffer เต็มพอก่อน
 
     function flushToClients() {
         if (jitterBuf.length === 0) return;
         if (receiveSelected.length === 0) {
             jitterBuf = Buffer.alloc(0);
+            bufferReady = false;
             return;
         }
+
+        // ✅ รอสะสม buffer ก่อน ลด underrun
+        if (!bufferReady) {
+            if (jitterBuf.length >= MIN_BUFFER) {
+                bufferReady = true;
+            } else {
+                return;
+            }
+        }
+
         while (jitterBuf.length >= TARGET_CHUNK) {
             const chunk = jitterBuf.slice(0, TARGET_CHUNK);
             jitterBuf = jitterBuf.slice(TARGET_CHUNK);
@@ -178,6 +187,7 @@ wss.on('connection', ws => {
     ws.on('close', () => {
         keepAliveActive = true;
         jitterBuf = Buffer.alloc(0);
+        bufferReady = false;
         receiveSelected = [];
         console.log('📡 Browser WS disconnected');
     });
@@ -200,28 +210,29 @@ setInterval(() => {
 
 async function playAudioToESP32(pcmFile, targetDevices = []) {
   const filePath = path.join(pcmFolder, pcmFile);
-  if (!fs.existsSync(filePath)) {
-    console.error('PCM file not found:', pcmFile);
-    return;
-  }
+  if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
 
   const pcmData = fs.readFileSync(filePath);
-  const chunkSize = 1024;
+  const chunkSize = 3200; // ✅ 3200 bytes = 100ms ที่ 16000Hz 16bit mono (16000*2*0.1)
 
-  // ✅ return Promise เพื่อให้ await รอจนเล่นจบจริง
   return new Promise(async (resolve) => {
     for (let i = 0; i < pcmData.length; i += chunkSize) {
       const chunk = pcmData.slice(i, i + chunkSize);
-      esp32Clients.forEach(client => {
-        if (targetDevices.includes(client.deviceId) && !client.res.writableEnded) {
-          try { client.res.write(chunk); } catch {}
-        }
+
+      const targets = esp32Clients.filter(client =>
+        targetDevices.includes(client.deviceId) && !client.res.writableEnded
+      );
+
+      targets.forEach(client => {
+        try { client.res.write(chunk); } catch {}
       });
-      await new Promise(r => setTimeout(r, 1));
+
+      await new Promise(r => setTimeout(r, 100)); // ✅ 100ms ตรงกับ chunk size
     }
     resolve();
   });
 }
+
 // POST /schedule
 app.post("/schedule", (req, res) => {
   const { fileName, schedAt, mode, devices } = req.body;
