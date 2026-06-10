@@ -263,11 +263,12 @@ app.post("/schedule", (req, res) => {
       console.log("[Scheduler] ลบ schedule id:", id);
     });
 
-  } else if (mode === "ประจำ") {
+  } else if (mode === "ประจำ" || mode === "จันทร์-ศุกร์") {
     // ✅ ใช้ cron — ทำงานทุกวันที่เวลานี้ ไม่ต้อง re-schedule
     const h = jobTime.getUTCHours();    // jobTime อยู่ใน UTC แล้ว (+07:00 ถูก parse แล้ว)
     const m = jobTime.getUTCMinutes();
-    const cronExpr = `${m} ${h} * * *`;  // ทุกวัน HH:MM (UTC)
+    const days = getCronDays(mode);
+    const cronExpr = `${m} ${h} * * ${days}`;
     console.log("[Scheduler] ประจำ cron:", cronExpr);
 
     job = schedule.scheduleJob(cronExpr, async () => {
