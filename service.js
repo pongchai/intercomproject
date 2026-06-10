@@ -208,33 +208,36 @@ setInterval(() => {
 
 // schedule
 
+const fs = require('fs');
+
 async function playAudioToESP32(pcmFile, targetDevices = []) {
   const filePath = path.join(pcmFolder, pcmFile);
   if (!fs.existsSync(filePath)) return console.error('PCM file not found:', pcmFile);
 
-  const pcmData = fs.readFileSync(filePath);
-  
-  // 16000 Hz × 2 bytes = 32000 bytes/sec
-  // ส่ง 3200 bytes ทุก 100ms → ตรง bitrate พอดี
   const CHUNK_SIZE = 3200;
   const DELAY_MS = 100;
 
-  return new Promise(async (resolve) => {
-    for (let i = 0; i < pcmData.length; i += CHUNK_SIZE) {
-      const chunk = pcmData.slice(i, i + CHUNK_SIZE);
+  return new Promise((resolve, reject) => {
+    const readStream = fs.createReadStream(filePath, { 
+      highWaterMark: CHUNK_SIZE 
+    });
+
+    readStream.on('data', async (chunk) => {
+      readStream.pause(); // หยุดรอก่อน
 
       const targets = esp32Clients.filter(client =>
         targetDevices.includes(client.deviceId) && !client.res.writableEnded
       );
-
       targets.forEach(client => {
         try { client.res.write(chunk); } catch {}
       });
 
-      // ใช้ Promise แบบนี้แม่นกว่า setTimeout ธรรมดา
       await new Promise(r => setTimeout(r, DELAY_MS));
-    }
-    resolve();
+      readStream.resume(); // อ่านต่อ
+    });
+
+    readStream.on('end', resolve);
+    readStream.on('error', reject);
   });
 }
 
